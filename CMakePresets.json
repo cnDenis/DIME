@@ -1,0 +1,82 @@
+{
+  "version": 6,
+  "cmakeMinimumRequired": {
+    "major": 3,
+    "minor": 20,
+    "patch": 0
+  },
+  "configurePresets": [
+    {
+      "name": "x64-debug",
+      "displayName": "x64 Debug",
+      "description": "64-bit Debug (Notepad 64-bit, etc.)",
+      "generator": "Ninja",
+      "binaryDir": "${sourceDir}/out/x64/Debug",
+      "architecture": {
+        "value": "x64",
+        "strategy": "external"
+      },
+      "cacheVariables": {
+        "CMAKE_BUILD_TYPE": "Debug"
+      }
+    },
+    {
+      "name": "x86-debug",
+      "displayName": "x86 Debug (32-bit)",
+      "description": "32-bit Debug (32-bit Word, etc.)",
+      "generator": "Ninja",
+      "binaryDir": "${sourceDir}/out/x86/Debug",
+      "architecture": {
+        "value": "x86",
+        "strategy": "external"
+      },
+      "cacheVariables": {
+        "CMAKE_BUILD_TYPE": "Debug"
+      }
+    },
+    {
+      "name": "x64-release",
+      "displayName": "x64 Release",
+      "generator": "Ninja",
+      "binaryDir": "${sourceDir}/out/x64/Release",
+      "architecture": {
+        "value": "x64",
+        "strategy": "external"
+      },
+      "cacheVariables": {
+        "CMAKE_BUILD_TYPE": "Release"
+      }
+    },
+    {
+      "name": "x86-release",
+      "displayName": "x86 Release (32-bit)",
+      "generator": "Ninja",
+      "binaryDir": "${sourceDir}/out/x86/Release",
+      "architecture": {
+        "value": "x86",
+        "strategy": "external"
+      },
+      "cacheVariables": {
+        "CMAKE_BUILD_TYPE": "Release"
+      }
+    }
+  ],
+  "buildPresets": [
+    {
+      "name": "x64-debug",
+      "configurePreset": "x64-debug"
+    },
+    {
+      "name": "x86-debug",
+      "configurePreset": "x86-debug"
+    },
+    {
+      "name": "x64-release",
+      "configurePreset": "x64-release"
+    },
+    {
+      "name": "x86-release",
+      "configurePreset": "x86-release"
+    }
+  ]
+}
