@@ -12,6 +12,41 @@
 #include "CompositionProcessorEngine.h"
 #include "Compartment.h"
 #include "StatusWindow.h"
+
+#include <vector>
+#include <algorithm>
+
+// Per-process list of live CDIME instances and a single system-wide hook that
+// watches for foreground-window changes. Used to hide the floating status bar
+// whenever this process is NOT the foreground application (see _IsHostForeground
+// and _RefreshStatusWindow). Without this, every process that ever activated
+// the IME would keep its own bar on screen, piling up duplicates across apps.
+static std::vector<CDIME*> s_activeDIMEs;
+static HWINEVENTHOOK s_hForeHook = nullptr;
+
+static void CALLBACK _ForegroundWinEventProc(
+    HWINEVENTHOOK hHook,
+    DWORD event,
+    HWND hwnd,
+    LONG idObject,
+    LONG idChild,
+    DWORD idEventThread,
+    DWORD dwmsEventTime)
+{
+    if (event != EVENT_SYSTEM_FOREGROUND)
+        return;
+
+    // Snapshot under the lock, then refresh outside it to avoid reentrancy.
+    EnterCriticalSection(&Global::CS);
+    std::vector<CDIME*> snapshot = s_activeDIMEs;
+    LeaveCriticalSection(&Global::CS);
+
+    for (CDIME* p : snapshot)
+    {
+        if (p != nullptr)
+            p->_RefreshStatusWindow();
+    }
+}
 #include "DebugLog.h"
 
 //+---------------------------------------------------------------------------
@@ -209,6 +244,17 @@ void CDIME::_UninitStatusWindow()
 //
 //----------------------------------------------------------------------------
 
+BOOL CDIME::_IsHostForeground() const
+{
+    HWND hwndFG = GetForegroundWindow();
+    if (hwndFG == nullptr)
+        return FALSE;
+
+    DWORD dwFGpid = 0;
+    GetWindowThreadProcessId(hwndFG, &dwFGpid);
+    return (dwFGpid == GetCurrentProcessId());
+}
+
 void CDIME::_RefreshStatusWindow()
 {
     if (_pStatusWindow == nullptr)
@@ -227,6 +273,16 @@ void CDIME::_RefreshStatusWindow()
     // No thread focus: there is no active document, so hide the free-floating
     // bar entirely.
     if (!_isThreadFocused)
+    {
+        _pStatusWindow->_Show(FALSE);
+        return;
+    }
+
+    // Only show while THIS process is the foreground application. TSF's
+    // per-thread "focus" is independent of the desktop foreground window, so
+    // without this gate every process that ever activated the IME would leave
+    // its bar on screen and pile up duplicates across apps.
+    if (!_IsHostForeground())
     {
         _pStatusWindow->_Show(FALSE);
         return;
@@ -465,6 +521,18 @@ STDAPI CDIME::ActivateEx(ITfThreadMgr *pThreadMgr, TfClientId tfClientId, DWORD 
     _isThreadFocused = TRUE;
     _InitStatusWindow();
 
+    // Track this instance and install a (process-wide single) foreground hook
+    // so the bar hides when we are no longer the foreground application.
+    EnterCriticalSection(&Global::CS);
+    s_activeDIMEs.push_back(this);
+    if (s_hForeHook == nullptr)
+    {
+        s_hForeHook = SetWinEventHook(
+            EVENT_SYSTEM_FOREGROUND, EVENT_SYSTEM_FOREGROUND,
+            nullptr, _ForegroundWinEventProc, 0, 0, WINEVENT_OUTOFCONTEXT);
+    }
+    LeaveCriticalSection(&Global::CS);
+
     return S_OK;
 
 ExitError:
@@ -480,6 +548,26 @@ ExitError:
 
 STDAPI CDIME::Deactivate()
 {
+    // Stop tracking this instance; tear down the foreground hook when the last
+    // one goes away.
+    HWINEVENTHOOK hHookToUnhook = nullptr;
+    EnterCriticalSection(&Global::CS);
+    auto it = std::find(s_activeDIMEs.begin(), s_activeDIMEs.end(), this);
+    if (it != s_activeDIMEs.end())
+    {
+        s_activeDIMEs.erase(it);
+    }
+    if (s_activeDIMEs.empty() && s_hForeHook != nullptr)
+    {
+        hHookToUnhook = s_hForeHook;
+        s_hForeHook = nullptr;
+    }
+    LeaveCriticalSection(&Global::CS);
+    if (hHookToUnhook != nullptr)
+    {
+        UnhookWinEvent(hHookToUnhook);
+    }
+
     _UninitStatusWindow();
 
     if (_pCompositionProcessorEngine)

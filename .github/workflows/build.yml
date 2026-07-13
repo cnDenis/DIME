@@ -1,0 +1,94 @@
+name: Build and Package
+
+# Build the DIME IME (x64 + x86) and produce the Inno Setup installer on every
+# push / PR. When a version tag (v*.*.*) is pushed, the installer is also
+# attached to a GitHub Release.
+
+on:
+  push:
+    branches: [main]
+    tags: ["v*.*.*"]
+  pull_request:
+    branches: [main]
+  workflow_dispatch:
+
+permissions:
+  contents: write   # needed only for uploading release assets on tag push
+
+jobs:
+  build:
+    runs-on: windows-latest
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Setup MSBuild
+        uses: microsoft/setup-msbuild@v2
+
+      # Do not hard-code the VS generator: the hosted runner may ship a newer
+      # Visual Studio (e.g. VS 18) than "Visual Studio 17 2022". Letting CMake
+      # pick its default generator uses whatever VS is actually installed, while
+      # -A still selects the target architecture.
+      - name: Configure CMake (x64)
+        run: cmake -S . -B out/x64 -A x64
+
+      - name: Configure CMake (x86)
+        run: cmake -S . -B out/x86 -A Win32
+
+      - name: Build x64 Release
+        run: cmake --build out/x64 --config Release -- /m
+
+      - name: Build x86 Release
+        run: cmake --build out/x86 --config Release -- /m
+
+      - name: Compile binary dictionaries
+        shell: pwsh
+        run: |
+          out/x64/Release/build_bindict.exe Dictionary/wubi98.txt Dictionary/wubi98.bin
+          out/x64/Release/build_bindict.exe Dictionary/pinyin.txt Dictionary/pinyin.bin --max-code 24
+
+      - name: Assemble dist layout
+        shell: pwsh
+        run: |
+          $dist = "out/dist/DIME"
+          New-Item -ItemType Directory -Force -Path "$dist/dict" | Out-Null
+          Copy-Item out/x64/Release/dime.dll        "$dist/dime64.dll"
+          Copy-Item out/x86/Release/dime.dll        "$dist/dime32.dll"
+          Copy-Item out/x64/Release/build_bindict.exe "$dist/"
+          Copy-Item Dictionary/wubi98.txt, Dictionary/pinyin.txt, Dictionary/wubi98.bin, Dictionary/pinyin.bin "$dist/dict/"
+
+      - name: Install Inno Setup
+        run: choco install innosetup --no-progress -y
+
+      - name: Determine version
+        id: version
+        shell: pwsh
+        run: |
+          if ($env:GITHUB_REF -like 'refs/tags/v*') {
+              $v = $env:GITHUB_REF -replace 'refs/tags/v', ''
+          } else {
+              $date = (Get-Date).ToString('yyyyMMdd')
+              $sha  = (git rev-parse --short=6 HEAD).Trim()
+              $v = "$date-$sha"
+          }
+          echo "version=$v" >> $env:GITHUB_OUTPUT
+          echo "Version: $v"
+
+      - name: Build installer (DIME_<version>_Setup.exe)
+        run: |
+          & "C:\Program Files (x86)\Inno Setup 6\ISCC.exe" /DMyAppVersion=${{ steps.version.outputs.version }} installer/DIME.iss
+
+      - name: Upload installer artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: DIME-Setup
+          path: out/dist/DIME_${{ steps.version.outputs.version }}_Setup.exe
+          if-no-files-found: error
+
+      - name: Publish to GitHub Release
+        if: startsWith(github.ref, 'refs/tags/v')
+        uses: softprops/action-gh-release@v2
+        with:
+          files: out/dist/DIME_${{ steps.version.outputs.version }}_Setup.exe
+          fail_on_unmatched_files: true
