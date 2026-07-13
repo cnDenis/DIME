@@ -48,12 +48,27 @@ REM build_bindict.exe ships next to the DLLs (same dir), where the runtime probe
 copy /Y "%ROOT%\out\x64\Release\build_bindict.exe" "%DIST%\" >nul
 echo   dist -> %DIST%
 
-REM 4) Compile the Inno Setup installer -> out\dist\DIME-Setup.exe
+REM 4) Compile the Inno Setup installer -> out\dist\DIME-<ver>_Setup.exe
 echo.
-echo === Step 4/4: Build DIME-Setup.exe ===
-"%ISCC%" "%ROOT%\installer\DIME.iss"
+echo === Step 4/4: Build DIME Setup ===
+
+REM Version: when HEAD is exactly a git tag, use it (minus the "v" prefix);
+REM otherwise fall back to <date>-<short sha> so every dev build is uniquely
+REM identifiable. Passed to ISCC via /DMyAppVersion (keeps the .iss generic).
+set "DIME_VERSION="
+for /f "tokens=*" %%g in ('git describe --tags --exact-match 2^>nul') do set "DIME_VERSION=%%g"
+if defined DIME_VERSION (
+    set "DIME_VERSION=%DIME_VERSION:v=%"
+) else (
+    for /f "tokens=*" %%g in ('powershell -NoProfile -Command "(Get-Date).ToString('yyyyMMdd')"') do set "DATEPART=%%g"
+    for /f "tokens=*" %%g in ('git rev-parse --short=6 HEAD') do set "SHAPART=%%g"
+    set "DIME_VERSION=!DATEPART!-!SHAPART!"
+)
+echo   version: %DIME_VERSION%
+
+"%ISCC%" /DMyAppVersion=%DIME_VERSION% "%ROOT%\installer\DIME.iss"
 if errorlevel 1 exit /b 1
 
 echo.
-echo Done. Installer: %ROOT%\out\dist\DIME-Setup.exe
+echo Done. Installer: %ROOT%\out\dist\DIME_%DIME_VERSION%_Setup.exe
 exit /b 0

@@ -456,7 +456,18 @@ void CStatusWindow::_OnMouseMove(POINT pt)
         _GetClientRect(&rc);
         _ClampToWorkArea(x, y, rc.right - rc.left, rc.bottom - rc.top);
 
+        // Remember the rect we are about to vacate so we can force the OS to
+        // repaint it. A topmost tool window does not reliably trigger a repaint
+        // of the area it leaves behind, so without this the bar's pixels would
+        // linger at the original spot and look like a second status bar.
+        RECT rcOld = {0};
+        _GetWindowRect(&rcOld);
+
         _Move(x, y);
+
+        ::RedrawWindow(GetDesktopWindow(), &rcOld, nullptr,
+            RDW_ERASE | RDW_INVALIDATE | RDW_UPDATENOW | RDW_ALLCHILDREN);
+        _RepaintNow();
         return;
     }
 
@@ -588,7 +599,13 @@ void CStatusWindow::_OnLButtonUp(POINT pt)
         int x = wr.left;
         int y = wr.top;
         _SnapToEdges(x, y, w, h);
+
+        // Force a repaint of the area we just left (same reason as in
+        // _OnMouseMove) so the bar does not leave a ghost at the drop point.
         _Move(x, y);
+        ::RedrawWindow(GetDesktopWindow(), &wr, nullptr,
+            RDW_ERASE | RDW_INVALIDATE | RDW_UPDATENOW | RDW_ALLCHILDREN);
+        _RepaintNow();
 
         _SavePosition();
         return;

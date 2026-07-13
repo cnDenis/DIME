@@ -115,6 +115,7 @@ public:
     BOOL _InitStatusWindow();
     void _UninitStatusWindow();
     void _RefreshStatusWindow();
+    BOOL _IsHostForeground() const;
     static void _StatusWndCallback(void *pv, int item);
 
     // key event handlers for composition/candidate/phrase common objects.

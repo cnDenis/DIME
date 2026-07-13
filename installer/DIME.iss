@@ -12,9 +12,13 @@
 ;   * 注册需要管理员权限（PrivilegesRequired=admin）。
 
 #define MyAppName      "DIME 迪铭五笔输入法"
-#define MyAppVersion   "1.0.0"
-#define MyAppPublisher "DIME"
-#define MyAppURL       "https://github.com/denis/dime"
+; Version can be overridden from CI via "ISCC /DMyAppVersion=x.y.z".
+; Falls back to MyAppVersion when built locally without the define.
+#ifndef MyAppVersion
+#define MyAppVersion   "1.0.1"
+#endif
+#define MyAppPublisher "cnDenis"
+#define MyAppURL       "https://github.com/cnDenis/DIME"
 #define MyDist         "..\out\dist\DIME"
 
 [Setup]
@@ -27,7 +31,7 @@ AppSupportURL={#MyAppURL}
 DefaultDirName={autopf}\DIME
 DefaultGroupName={#MyAppName}
 OutputDir=..\out\dist
-OutputBaseFilename=DIME-Setup
+OutputBaseFilename=DIME_{#MyAppVersion}_Setup
 SetupIconFile=..\image\Dime.ico
 Compression=lzma2
 SolidCompression=yes
@@ -37,16 +41,22 @@ UsedUserAreasWarning=no
 WizardStyle=modern
 ; 安装过程中若被占用，提示关闭（IME 宿主如 Word/Notepad 一般不影响文件复制）
 CloseApplications=yes
+; 若因文件被占用而推迟到重启后替换，安装结束时提示用户重启
+RestartIfNeededByRun=yes
 
 [Languages]
 Name: "english"; MessagesFile: "compiler:Default.isl"
 
 [Files]
-Source: "{#MyDist}\dime64.dll"; DestDir: "{app}"; Flags: ignoreversion
-Source: "{#MyDist}\dime32.dll"; DestDir: "{app}"; Flags: ignoreversion
+; restartreplace: if the DLL is locked (e.g. loaded by ctfmon / an IME host),
+; defer the replacement to the next reboot instead of showing a "file in use"
+; dialog. uninsrestartdelete: likewise defer deletion to reboot on uninstall.
+Source: "{#MyDist}\dime64.dll"; DestDir: "{app}"; Flags: ignoreversion restartreplace uninsrestartdelete
+Source: "{#MyDist}\dime32.dll"; DestDir: "{app}"; Flags: ignoreversion restartreplace uninsrestartdelete
 ; build_bindict.exe lives next to the DLLs; the runtime probes it there first.
 Source: "{#MyDist}\build_bindict.exe"; DestDir: "{app}"; Flags: ignoreversion
-Source: "{#MyDist}\dict\*"; DestDir: "{app}\dict"; Flags: ignoreversion recursesubdirs createallsubdirs
+; 码表文件: 替换前询问用户 (confirmoverwrite)；若文件被占用则重启后替换 (restartreplace)
+Source: "{#MyDist}\dict\*"; DestDir: "{app}\dict"; Flags: ignoreversion recursesubdirs createallsubdirs confirmoverwrite restartreplace
 
 [Run]
 ; 注册 64 位 DLL（原生 System32\regsvr32，写入 64 位注册表视图）
