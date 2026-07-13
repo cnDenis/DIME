@@ -114,6 +114,7 @@ private:
 
     TEXTMETRIC _TextMetric;
     int _cyRow;
+    int _iconSize;   // DPI-scaled status icon size (16 at the 125% reference)
     int _cxTitle;
     UINT _wndWidth;
 

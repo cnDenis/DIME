@@ -30,6 +30,11 @@
 
 #define SAMPLEIME_FONT_DEFAULT L"Microsoft YaHei UI"
 
+// Layout metrics below are tuned at 125% display scaling (DPI 120 = 96 * 1.25).
+// At runtime they are scaled by (current DPI / DIME_REFERENCE_DPI) so other
+// scalings stay proportional to this reference look (125% is the baseline).
+#define DIME_REFERENCE_DPI          (120)
+
 //---------------------------------------------------------------------
 // defined Candidated Window
 //---------------------------------------------------------------------

@@ -109,14 +109,14 @@ if !MAX! gtr 0 (
         echo Unregister x64: %PREV_DIR%\x64\dime64.dll
         "%REGSVR64%" /u /s "%PREV_DIR%\x64\dime64.dll"
     ) else if exist "%PREV_DIR%\x64\dime.dll" (
-        echo Unregister x64 (legacy): %PREV_DIR%\x64\dime.dll
+        echo Unregister x64 legacy: %PREV_DIR%\x64\dime.dll
         "%REGSVR64%" /u /s "%PREV_DIR%\x64\dime.dll"
     )
     if exist "%PREV_DIR%\x86\dime32.dll" (
         echo Unregister x86: %PREV_DIR%\x86\dime32.dll
         "%REGSVR32%" /u /s "%PREV_DIR%\x86\dime32.dll"
     ) else if exist "%PREV_DIR%\x86\dime.dll" (
-        echo Unregister x86 (legacy): %PREV_DIR%\x86\dime.dll
+        echo Unregister x86 legacy: %PREV_DIR%\x86\dime.dll
         "%REGSVR32%" /u /s "%PREV_DIR%\x86\dime.dll"
     )
     if exist "%PREV_DIR%\dime.dll" (
