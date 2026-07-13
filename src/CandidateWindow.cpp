@@ -12,12 +12,11 @@
 
 namespace
 {
-const int CAND_STATUS_ICON_SIZE = 16;
-
 struct CStatusIconCacheSlot
 {
     DWORD iconResId;
     COLORREF tintColor;
+    int size;           // pixel size the cached bitmap was rendered at (DPI-scaled)
     HBITMAP hBitmap;
 };
 
@@ -114,12 +113,18 @@ HBITMAP CreateTintedStatusIconBitmap(int size, DWORD iconResId, COLORREF tintCol
     return hBitmap;
 }
 
-HBITMAP GetCachedStatusIconBitmap(DWORD iconResId, COLORREF tintColor)
+HBITMAP GetCachedStatusIconBitmap(DWORD iconResId, COLORREF tintColor, int size)
 {
+    if (size <= 0)
+    {
+        return nullptr;
+    }
+
     for (int i = 0; i < ARRAYSIZE(g_statusIconCache); ++i)
     {
         if (g_statusIconCache[i].iconResId == iconResId &&
             g_statusIconCache[i].tintColor == tintColor &&
+            g_statusIconCache[i].size == size &&
             g_statusIconCache[i].hBitmap != nullptr)
         {
             return g_statusIconCache[i].hBitmap;
@@ -133,11 +138,19 @@ HBITMAP GetCachedStatusIconBitmap(DWORD iconResId, COLORREF tintColor)
             continue;
         }
 
-        if (g_statusIconCache[i].hBitmap == nullptr)
+        // Re-render if empty or the DPI-scaled size changed (e.g. moved to a
+        // monitor with a different scaling).
+        if (g_statusIconCache[i].hBitmap == nullptr || g_statusIconCache[i].size != size)
         {
+            if (g_statusIconCache[i].hBitmap != nullptr)
+            {
+                DeleteObject(g_statusIconCache[i].hBitmap);
+                g_statusIconCache[i].hBitmap = nullptr;
+            }
             g_statusIconCache[i].iconResId = iconResId;
             g_statusIconCache[i].tintColor = tintColor;
-            g_statusIconCache[i].hBitmap = CreateTintedStatusIconBitmap(CAND_STATUS_ICON_SIZE, iconResId, tintColor);
+            g_statusIconCache[i].size = size;
+            g_statusIconCache[i].hBitmap = CreateTintedStatusIconBitmap(size, iconResId, tintColor);
         }
 
         return g_statusIconCache[i].hBitmap;
@@ -168,6 +181,7 @@ CCandidateWindow::CCandidateWindow(_In_ CANDWNDCALLBACK pfnCallback, _In_ void *
     _pShadowWnd = nullptr;
 
     _cyRow = CANDWND_ROW_WIDTH;
+    _iconSize = 16;   // 125% reference (DPI 120); re-scaled in _ResizeWindow()
     _cxTitle = 0;
 
     _wndWidth = 0;
@@ -260,8 +274,38 @@ BOOL CCandidateWindow::_CreateBackGroundShadowWindow()
     return TRUE;
 }
 
+// Scale the row height to the monitor DPI, using 125% (DPI 120) as the
+// reference so the current good-looking size is preserved and other scalings
+// stay proportional. We read the same DPI the global font is built from
+// (primary monitor via GetDC(NULL)/LOGPIXELSX) so row height and font never
+// diverge.
+static UINT DimeGetWindowDpi(HWND)
+{
+    HDC dc = GetDC(NULL);
+    UINT dpi = dc ? GetDeviceCaps(dc, LOGPIXELSX) : 96;
+    if (dc) ReleaseDC(NULL, dc);
+    return dpi ? dpi : 96;
+}
+
+// Icons pick a preferred pixel size per display-scaling tier (the same DPI
+// tiers as the candidate font), never below 16px so they stay legible.
+static int DimeSelectIconPixelHeight(UINT dpi)
+{
+    if (dpi <= 156) return 16;   // 100% / 125% / 150%
+    if (dpi <= 180) return 20;   // 175%
+    if (dpi <= 216) return 24;   // 200%
+    return 32;                   // 250% and above
+}
+
 void CCandidateWindow::_ResizeWindow()
 {
+    // Row height follows the DPI so text is never dwarfed by fixed padding.
+    UINT dpi = DimeGetWindowDpi(_GetWnd());
+    _cyRow = static_cast<int>(CANDWND_ROW_WIDTH * (static_cast<float>(dpi) / DIME_REFERENCE_DPI) + 0.5f);
+    // Status icons pick a preferred pixel size per display-scaling tier (same
+    // tiers as the candidate font), never below 16px so they stay legible.
+    _iconSize = DimeSelectIconPixelHeight(dpi);
+
     SIZE size = {0, 0};
 
     _cxTitle = max(_cxTitle, size.cx + 2 * GetSystemMetrics(SM_CXFRAME));
@@ -673,12 +717,12 @@ void CCandidateWindow::_SetEnglishMode(BOOL isEnglishMode)
 
 void CCandidateWindow::_DrawResourceIcon(_In_ HDC dcHandle, int x, int y, int size, DWORD iconResId, COLORREF tintColor)
 {
-    if (size != CAND_STATUS_ICON_SIZE)
+    if (size <= 0)
     {
         return;
     }
 
-    HBITMAP hBitmap = GetCachedStatusIconBitmap(iconResId, tintColor);
+    HBITMAP hBitmap = GetCachedStatusIconBitmap(iconResId, tintColor, size);
     if (!hBitmap)
     {
         return;
@@ -739,8 +783,10 @@ void CCandidateWindow::_DrawStatusIcons(_In_ HDC dcHandle, _In_ RECT *prc)
         return;
     }
 
-    const int iconSize = 16;
-    const int iconGap = 4;
+    // _iconSize is already DPI-scaled (16px at the 125% reference); the gap
+    // scales proportionally so icons stay evenly spaced at any DPI.
+    const int iconSize = _iconSize;
+    const int iconGap = static_cast<int>(4.0f * static_cast<float>(iconSize) / 16.0f + 0.5f);
     const int rightMargin = CANDWND_BORDER_WIDTH + 2;
     const int cyLine = prc->bottom - prc->top;
     const int iconY = prc->top + (cyLine - iconSize) / 2;
@@ -750,7 +796,15 @@ void CCandidateWindow::_DrawStatusIcons(_In_ HDC dcHandle, _In_ RECT *prc)
     // "Only common characters" indicator: drawn at the far right, to the right
     // of the Chinese/English punctuation icon. "常" = common-only, "全" = all.
     {
+        // The 常/全 tag sits right next to the status icons, so draw it at the
+        // same pixel size as the icons. The global font may be smaller at low
+        // DPI (e.g. 14px text vs 16px icon at 100%), which would look off.
         const WCHAR onlyCommonCh = _isOnlyCommon ? L'常' : L'全';
+        LOGFONTW lf = {0};
+        GetObjectW(Global::defaultlFontHandle, sizeof(lf), &lf);
+        lf.lfHeight = -iconSize;
+        HFONT hTagFont = CreateFontIndirectW(&lf);
+        HFONT hOldFont = hTagFont ? (HFONT)SelectObject(dcHandle, hTagFont) : nullptr;
         SIZE charSize = {0};
         GetTextExtentPoint32(dcHandle, &onlyCommonCh, 1, &charSize);
         int textY = prc->top + (cyLine - charSize.cy) / 2;
@@ -758,6 +812,8 @@ void CCandidateWindow::_DrawStatusIcons(_In_ HDC dcHandle, _In_ RECT *prc)
         SetTextColor(dcHandle, CANDWND_ACCENT_COLOR);
         SetBkColor(dcHandle, GetSysColor(CANDWND_HEADER_BK_SYSCOLOR));
         ExtTextOut(dcHandle, x, textY, ETO_OPAQUE, nullptr, &onlyCommonCh, 1, NULL);
+        if (hOldFont) SelectObject(dcHandle, hOldFont);
+        if (hTagFont) DeleteObject(hTagFont);
         x -= iconGap;
     }
 

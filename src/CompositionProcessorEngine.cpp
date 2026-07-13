@@ -2305,20 +2305,34 @@ void CCompositionProcessorEngine::SetInitialCandidateListRange()
     }
 }
 
+// Pick a preferred candidate/font pixel height from a fixed set of
+// well-proportioned sizes (14/16/18/20/24/32), one tier per common display
+// scaling, instead of a continuous DPI formula. This keeps the rendered text
+// size on clean values at every scaling.
+static int DimeSelectFontPixelHeight(UINT dpi)
+{
+    if (dpi <= 108) return 14;   // 100%
+    if (dpi <= 156) return 16;   // 125% and 150%
+    if (dpi <= 180) return 20;   // 175%
+    if (dpi <= 216) return 24;   // 200%
+    return 32;                   // 250% and above
+}
+
 void CCompositionProcessorEngine::SetDefaultCandidateTextFont()
 {
     // Candidate Text Font
     if (Global::defaultlFontHandle == nullptr)
     {
+        UINT dpi = GetDeviceCaps(GetDC(NULL), LOGPIXELSY);
 		WCHAR fontName[50] = {'\0'}; 
 		LoadString(Global::dllInstanceHandle, IDS_DEFAULT_FONT, fontName, 50);
-        Global::defaultlFontHandle = CreateFont(-MulDiv(10, GetDeviceCaps(GetDC(NULL), LOGPIXELSY), 72), 0, 0, 0, FW_MEDIUM, 0, 0, 0, 0, 0, 0, 0, 0, fontName);
+        Global::defaultlFontHandle = CreateFont(-DimeSelectFontPixelHeight(dpi), 0, 0, 0, FW_MEDIUM, 0, 0, 0, 0, 0, 0, 0, 0, fontName);
         if (!Global::defaultlFontHandle)
         {
 			LOGFONT lf;
 			SystemParametersInfo(SPI_GETICONTITLELOGFONT, sizeof(LOGFONT), &lf, 0);
             // Fall back to the default GUI font on failure.
-            Global::defaultlFontHandle = CreateFont(-MulDiv(10, GetDeviceCaps(GetDC(NULL), LOGPIXELSY), 72), 0, 0, 0, FW_MEDIUM, 0, 0, 0, 0, 0, 0, 0, 0, lf.lfFaceName);
+            Global::defaultlFontHandle = CreateFont(-DimeSelectFontPixelHeight(dpi), 0, 0, 0, FW_MEDIUM, 0, 0, 0, 0, 0, 0, 0, 0, lf.lfFaceName);
         }
     }
 }

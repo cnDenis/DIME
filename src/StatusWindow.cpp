@@ -9,6 +9,7 @@
 #include "Globals.h"
 #include "StatusWindow.h"
 #include "RegKey.h"
+#include "Define.h"
 
 //+---------------------------------------------------------------------------
 //
@@ -65,6 +66,37 @@ CStatusWindow::~CStatusWindow()
 //
 //----------------------------------------------------------------------------
 
+// Scale chrome to the monitor DPI, using 125% (DPI 120) as the reference so the
+// current good-looking size is preserved and other scalings stay proportional.
+static UINT DimeGetWindowDpi(HWND)
+{
+    HDC dc = GetDC(NULL);
+    UINT dpi = dc ? GetDeviceCaps(dc, LOGPIXELSX) : 96;
+    if (dc) ReleaseDC(NULL, dc);
+    return dpi ? dpi : 96;
+}
+
+// Icons pick a preferred pixel size per display-scaling tier (the same DPI
+// tiers as the candidate font), never below 16px so they stay legible.
+static int DimeSelectIconPixelHeight(UINT dpi)
+{
+    if (dpi <= 156) return 16;   // 100% / 125% / 150%
+    if (dpi <= 180) return 20;   // 175%
+    if (dpi <= 216) return 24;   // 200%
+    return 32;                   // 250% and above
+}
+
+// Same segmented font-size selector as the candidate window, so the status
+// bar's padding / radius scale in the same tiers as the text.
+static int DimeSelectFontPixelHeight(UINT dpi)
+{
+    if (dpi <= 108) return 14;   // 100%
+    if (dpi <= 156) return 16;   // 125% and 150%
+    if (dpi <= 180) return 20;   // 175%
+    if (dpi <= 216) return 24;   // 200%
+    return 32;                   // 250% and above
+}
+
 BOOL CStatusWindow::_Create(ATOM atom, _In_opt_ HWND parentWndHandle)
 {
     if (!CBaseWindow::_Create(atom,
@@ -74,6 +106,17 @@ BOOL CStatusWindow::_Create(ATOM atom, _In_opt_ HWND parentWndHandle)
     {
         return FALSE;
     }
+
+    // Icon keeps its own segmented size (min 16px). The surrounding chrome
+    // (padding / gap / corner radius) is derived from the segmented font size
+    // so the whole status bar scales in clean tiers with the text. At the 125%
+    // reference (font 16px) this reproduces the original 4/3/5 metrics.
+    UINT dpi = DimeGetWindowDpi(_GetWnd());
+    _iconSize = DimeSelectIconPixelHeight(dpi);
+    int fontPx = DimeSelectFontPixelHeight(dpi);
+    _pad      = fontPx / 4;
+    _gap      = fontPx / 5;
+    _radius   = fontPx / 3;
 
     _hDimeIcon = (HICON)LoadImage(
         Global::dllInstanceHandle,

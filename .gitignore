@@ -59,3 +59,4 @@ $RECYCLE.BIN/
 /build/
 /doc/review/
 /build-win32
+/Dictionary/*.bin
