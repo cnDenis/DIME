@@ -1,15 +1,15 @@
-// THIS CODE AND INFORMATION IS PROVIDED "AS IS" WITHOUT WARRANTY OF
-// ANY KIND, EITHER EXPRESSED OR IMPLIED, INCLUDING BUT NOT LIMITED TO
-// THE IMPLIED WARRANTIES OF MERCHANTABILITY AND/OR FITNESS FOR A
-// PARTICULAR PURPOSE.
+// Copyright (c) 2026 cnDenis
 //
-// Copyright (c) Microsoft Corporation. All rights reserved.
+// SPDX-License-Identifier: MIT
+
 
 #include "Private.h"
 #include "Globals.h"
 #include "StatusWindow.h"
 #include "RegKey.h"
 #include "Define.h"
+#include "ContextMenu.h"
+#include "ConfigDialog.h"
 
 //+---------------------------------------------------------------------------
 //
@@ -95,6 +95,12 @@ static int DimeSelectFontPixelHeight(UINT dpi)
     if (dpi <= 180) return 20;   // 175%
     if (dpi <= 216) return 24;   // 200%
     return 32;                   // 250% and above
+}
+
+// Build the status window's rounded-rectangle region (all four corners rounded).
+static HRGN MakeStatusRgn(int w, int h, int r)
+{
+    return CreateRoundRectRgn(0, 0, w, h, 2 * r, 2 * r);
 }
 
 BOOL CStatusWindow::_Create(ATOM atom, _In_opt_ HWND parentWndHandle)
@@ -286,6 +292,39 @@ void CStatusWindow::_SavePosition()
 
 //+---------------------------------------------------------------------------
 //
+// CStatusWindow::_LoadHiddenState / _SetHiddenByUser
+//
+//  Persist the user's "hide status bar" choice in HKCU\Software\DIME so it
+//  survives restart / IME re-activation.
+//
+//----------------------------------------------------------------------------
+
+void CStatusWindow::_LoadHiddenState()
+{
+    CRegKey reg;
+    if (reg.Open(HKEY_CURRENT_USER, L"Software\\DIME") == ERROR_SUCCESS)
+    {
+        DWORD dw = 0;
+        if (reg.QueryDWORDValue(L"StatusWindowHidden", dw) == ERROR_SUCCESS)
+        {
+            _isHiddenByUser = (dw != 0);
+        }
+    }
+}
+
+void CStatusWindow::_SetHiddenByUser(BOOL hidden)
+{
+    _isHiddenByUser = hidden;
+
+    CRegKey reg;
+    if (reg.Create(HKEY_CURRENT_USER, L"Software\\DIME") == ERROR_SUCCESS)
+    {
+        reg.SetDWORDValue(L"StatusWindowHidden", hidden ? 1 : 0);
+    }
+}
+
+//+---------------------------------------------------------------------------
+//
 // CStatusWindow::_RestorePosition
 //
 //  Restore the saved position if present and still on a monitor; otherwise
@@ -307,6 +346,7 @@ void CStatusWindow::_RestorePosition()
     int x = -1;
     int y = -1;
     _LoadPosition(x, y);
+    _LoadHiddenState();
 
     if (x < 0 || y < 0 || !_IsOnAnyMonitor(x, y, w, h))
     {
@@ -436,17 +476,29 @@ void CStatusWindow::_OnPaint(_In_ HDC dcHandle, _In_ PAINTSTRUCT *pps)
     SetBkMode(dcHandle, oldBkMode);
     SelectObject(dcHandle, hOldFont);
 
-    // Thin rounded border, following the window region's shape.
-    HPEN hPen = CreatePen(PS_SOLID, 1, RGB(0xB0, 0xB0, 0xB0));
-    HGDIOBJ hOldPen = SelectObject(dcHandle, hPen);
-    HGDIOBJ hOldBrush = SelectObject(dcHandle, GetStockObject(NULL_BRUSH));
-    RECT rcBorder = rc;
-    InflateRect(&rcBorder, -1, -1);
-    RoundRect(dcHandle, rcBorder.left, rcBorder.top, rcBorder.right, rcBorder.bottom,
-        2 * _radius, 2 * _radius);
-    SelectObject(dcHandle, hOldBrush);
-    SelectObject(dcHandle, hOldPen);
-    DeleteObject(hPen);
+    // Single 1px border following the window region: a gray ring between the
+    // outer region and a 1px-inset inner region. All four corners are rounded.
+    // Filling one ring (instead of an inset stroke) avoids a second "edge" line
+    // inside the window border.
+    int bw = rc.right - rc.left;
+    int bh = rc.bottom - rc.top;
+    HRGN hOuter = MakeStatusRgn(bw, bh, _radius);
+    HRGN hInner = (bw > 2 && bh > 2) ? MakeStatusRgn(bw - 2, bh - 2, _radius) : nullptr;
+    if (hInner)
+    {
+        OffsetRgn(hInner, 1, 1);
+    }
+    HRGN hRing = CreateRectRgn(0, 0, bw, bh);
+    if (hOuter && hInner && hRing)
+    {
+        CombineRgn(hRing, hOuter, hInner, RGN_DIFF);
+        HBRUSH hbrBorder = CreateSolidBrush(RGB(0xB0, 0xB0, 0xB0));
+        FillRgn(dcHandle, hRing, hbrBorder);
+        DeleteObject(hbrBorder);
+    }
+    if (hOuter) DeleteObject(hOuter);
+    if (hInner) DeleteObject(hInner);
+    if (hRing) DeleteObject(hRing);
 }
 
 //+---------------------------------------------------------------------------
@@ -472,6 +524,39 @@ void CStatusWindow::_OnLButtonDown(POINT pt)
         ClientToScreen(_GetWnd(), &screenPt);
         _dragOffset.x = screenPt.x - rc.left;
         _dragOffset.y = screenPt.y - rc.top;
+    }
+}
+
+//+---------------------------------------------------------------------------
+//
+// CStatusWindow::_OnRButtonDown
+//
+//  Right-click context menu (shared with the candidate window via
+//  DimeShowImeContextMenu). "功能设置" is a placeholder for now; "隐藏状态栏"
+//  just hides this floating bar.
+//
+//----------------------------------------------------------------------------
+
+void CStatusWindow::_OnRButtonDown(POINT pt)
+{
+    POINT screenPt = pt;
+    ClientToScreen(_GetWnd(), &screenPt);
+
+    RECT rc = {0};
+    _GetWindowRect(&rc);
+
+    BOOL isVisible = _IsWindowVisible();
+    switch (DimeShowImeContextMenu(_GetWnd(), screenPt, isVisible, &rc))
+    {
+        case DIME_CMD_SETTINGS:
+        DimeShowConfigDialog(_GetWnd(), reinterpret_cast<CDIME*>(_pv));
+        break;
+    case DIME_CMD_TOGGLE_STATUSBAR:
+        _SetHiddenByUser(isVisible);
+        _Show(!isVisible);
+        break;
+    default:
+        break;
     }
 }
 
@@ -612,7 +697,7 @@ void CStatusWindow::_ApplyRoundedCorners()
 
     int w = rc.right - rc.left;
     int h = rc.bottom - rc.top;
-    HRGN hrgn = CreateRoundRectRgn(0, 0, w, h, 2 * _radius, 2 * _radius);
+    HRGN hrgn = MakeStatusRgn(w, h, _radius);
     if (hrgn != nullptr)
     {
         SetWindowRgn(_GetWnd(), hrgn, TRUE);
@@ -701,6 +786,14 @@ LRESULT CALLBACK CStatusWindow::_WindowProcCallback(_In_ HWND wndHandle, UINT uM
             {
                 _OnLButtonUp(point);
             }
+        }
+        return 0;
+
+    case WM_RBUTTONUP:
+        {
+            POINT point;
+            POINTSTOPOINT(point, MAKEPOINTS(lParam));
+            _OnRButtonDown(point);
         }
         return 0;
 

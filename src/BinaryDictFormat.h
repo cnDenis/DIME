@@ -1,8 +1,7 @@
-// THIS CODE AND INFORMATION IS PROVIDED "AS IS" WITHOUT WARRANTY OF
-// ANY KIND, EITHER EXPRESSED OR IMPLIED, INCLUDING BUT NOT LIMITED TO
-// THE IMPLIED WARRANTIES OF MERCHANTABILITY AND/OR FITNESS FOR A
-// PARTICULAR PURPOSE.
+// Copyright (c) 2026 cnDenis
 //
+// SPDX-License-Identifier: MIT
+
 // DIME precompiled binary dictionary format (.bin).
 // Shared by the offline builder (src/build_bindict.cpp) and the runtime
 // reader (BinaryDictionaryEngine). This header is the single source of truth
@@ -10,6 +9,7 @@
 //
 // The header is intentionally dependency-light (only <cstdint>) so the offline
 // tool can include it without pulling in the IME/TSF runtime headers.
+
 
 #pragma once
 

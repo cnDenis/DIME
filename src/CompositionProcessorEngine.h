@@ -1,9 +1,8 @@
-// THIS CODE AND INFORMATION IS PROVIDED "AS IS" WITHOUT WARRANTY OF
-// ANY KIND, EITHER EXPRESSED OR IMPLIED, INCLUDING BUT NOT LIMITED TO
-// THE IMPLIED WARRANTIES OF MERCHANTABILITY AND/OR FITNESS FOR A
-// PARTICULAR PURPOSE.
+// Copyright (c) Microsoft Corporation.
+// Copyright (c) 2026 cnDenis
 //
-// Copyright (c) Microsoft Corporation. All rights reserved
+// SPDX-License-Identifier: MIT
+
 
 
 #pragma once
@@ -67,6 +66,26 @@ public:
     void TogglePunctuation(_In_ ITfThreadMgr *pThreadMgr, TfClientId tfClientId);
     void ToggleOnlyCommon(_In_ ITfThreadMgr *pThreadMgr, TfClientId tfClientId);
 
+    // Explicit setters used by the configuration dialog (set a concrete value
+    // instead of toggling, and persist the choice so it survives restart).
+    void SetDoubleSingleByte(_In_ ITfThreadMgr *pThreadMgr, TfClientId tfClientId, BOOL isFullWidth);
+    void SetPunctuation(_In_ ITfThreadMgr *pThreadMgr, TfClientId tfClientId, BOOL isChinesePunctuation);
+    void SetOnlyCommon(_In_ ITfThreadMgr *pThreadMgr, TfClientId tfClientId, BOOL isOnlyCommon);
+
+    // Persisted candidate-engine options surfaced in the config dialog.
+    void SetWildcard(BOOL v);
+    void SetDisableWildcardAtFirst(BOOL v);
+    void SetKeystrokeSort(BOOL v);
+    void SetCandidatePageSize(int n);
+    int  GetCandidatePageSize() const { return _candidatePageSize; }
+    // Candidate font size in pixels; 0 = auto (DPI tier), else fixed size.
+    void SetCandidateFontSize(int px);
+    int  GetCandidateFontSize() const { return _candidateFontSize; }
+    // Current auto-tier pixel height (same DPI buckets as SetDefaultCandidateTextFont).
+    static int GetAutoCandidateFontSize();
+    // Preview lookup for the settings dialog (does not touch the live keystroke buffer).
+    void GetPreviewCandidateList(_In_z_ LPCWSTR key, _Inout_ CDIMEArray<CCandidateListItem> *pList, UINT maxCount);
+
     // Punctuation
     BOOL IsPunctuation(WCHAR wch);
     WCHAR GetPunctuation(WCHAR wch);
@@ -101,6 +120,26 @@ public:
     // "Only common characters" filter (GB2312 level >= 1 single chars only).
     BOOL IsOnlyCommon() { return _isOnlyCommon; }
 
+    // 常用字模式下空码时回退检索全码表.
+    BOOL IsEmptyCodeSearchFull() const { return _emptyCodeSearchFull; }
+    void SetEmptyCodeSearchFull(BOOL v);
+
+    // After a digit key, output ',' / '.' as English (half-width) even in Chinese
+    // punctuation or full-width mode. Persisted in the settings dialog.
+    BOOL IsEnglishCommaPeriodAfterDigit() const { return _englishCommaPeriodAfterDigit; }
+    void SetEnglishCommaPeriodAfterDigit(BOOL v);
+    // Update / query follow-digit state from the key event sink.
+    void UpdateLastKeyWasDigit(UINT uCode, WCHAR wch);
+    BOOL ShouldOutputEnglishCommaOrPeriod(WCHAR wch) const;
+
+    // Hotkey enable/disable (settings dialog "快捷键").
+    BOOL IsHotkeyOnlyCommonEnabled() const { return _hotkeyOnlyCommonEnabled; }
+    void SetHotkeyOnlyCommonEnabled(BOOL v);
+    BOOL IsHotkeyPunctuationEnabled() const { return _hotkeyPunctuationEnabled; }
+    void SetHotkeyPunctuationEnabled(BOOL v);
+    BOOL IsHotkeyDoubleSingleByteEnabled() const { return _hotkeyDoubleSingleByteEnabled; }
+    void SetHotkeyDoubleSingleByteEnabled(BOOL v);
+
     // Language bar control
     void SetLanguageBarStatus(DWORD status, BOOL isSet);
 
@@ -133,7 +172,7 @@ private:
     void SetKeystrokeTable(_Inout_ CDIMEArray<_KEYSTROKE> *pKeystroke);
     void SetupPunctuationPair();
     void CreateLanguageBarButton(DWORD dwEnable, GUID guidLangBar, _In_z_ LPCWSTR pwszDescriptionValue, _In_z_ LPCWSTR pwszTooltipValue, DWORD dwOnIconIndex, DWORD dwOffIconIndex, _Outptr_result_maybenull_ CLangBarItemButton **ppLangBarItemButton, BOOL isSecureMode);
-    void SetInitialCandidateListRange();
+    void SetInitialCandidateListRange(int pageSize = 10);
     void SetDefaultCandidateTextFont();
 	void InitializeDIMECompartment(_In_ ITfThreadMgr *pThreadMgr, TfClientId tfClientId);
 	void _LoadSettings(_Inout_ BOOL &isFullWidth, _Inout_ BOOL &isChinesePunctuation);
@@ -238,11 +277,19 @@ private:
     BOOL _isPinyinInput : 1;
     BOOL _isEnglishInput : 1;
     BOOL _isOnlyCommon : 1;     // "only common characters" filter (GB2312)
+    BOOL _emptyCodeSearchFull : 1; // 空码时回退全码表
+    BOOL _englishCommaPeriodAfterDigit : 1; // digit then ,/. -> English
+    BOOL _lastKeyWasDigit : 1;  // runtime: previous keystroke was a digit
+    BOOL _hotkeyOnlyCommonEnabled : 1; // Ctrl+M toggle commonly/full dict
+    BOOL _hotkeyPunctuationEnabled : 1; // Ctrl+. toggle CN/EN punctuation
+    BOOL _hotkeyDoubleSingleByteEnabled : 1; // Shift+Space full/half width
     BOOL _candidateListIncremental : 1;
     BOOL _candidateListWildcard : 1;
     CCandidateRange _candidateListIndexRange;
     UINT _candidateListPhraseModifier;
     UINT _candidateWndWidth;
+    int  _candidatePageSize;   // candidates selectable per page (1-10)
+    int  _candidateFontSize;   // 0 = auto (DPI tiers), else fixed px
 
     BOOL _imeModeSnapshotValid;
     BOOL _imeModeSnapshotFullWidth;

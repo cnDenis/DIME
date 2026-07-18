@@ -1,14 +1,16 @@
-// THIS CODE AND INFORMATION IS PROVIDED "AS IS" WITHOUT WARRANTY OF
-// ANY KIND, EITHER EXPRESSED OR IMPLIED, INCLUDING BUT NOT LIMITED TO
-// THE IMPLIED WARRANTIES OF MERCHANTABILITY AND/OR FITNESS FOR A
-// PARTICULAR PURPOSE.
+// Copyright (c) Microsoft Corporation.
+// Copyright (c) 2026 cnDenis
 //
-// Copyright (c) Microsoft Corporation. All rights reserved
+// SPDX-License-Identifier: MIT
+
 
 #include "Private.h"
 #include "Globals.h"
 #include "BaseWindow.h"
 #include "CandidateWindow.h"
+#include "StatusWindow.h"
+#include "ContextMenu.h"
+#include "ConfigDialog.h"
 
 namespace
 {
@@ -306,6 +308,25 @@ void CCandidateWindow::_ResizeWindow()
     // tiers as the candidate font), never below 16px so they stay legible.
     _iconSize = DimeSelectIconPixelHeight(dpi);
 
+    // Keep text metrics / row height in sync with the live candidate font
+    // (auto DPI tier or a user-chosen fixed size from the settings dialog).
+    HWND hwnd = _GetWnd();
+    if (hwnd != nullptr && Global::defaultlFontHandle != nullptr)
+    {
+        HDC dc = GetDC(hwnd);
+        if (dc != nullptr)
+        {
+            HFONT hOld = (HFONT)SelectObject(dc, Global::defaultlFontHandle);
+            GetTextMetrics(dc, &_TextMetric);
+            SelectObject(dc, hOld);
+            ReleaseDC(hwnd, dc);
+            if (_TextMetric.tmHeight > _cyRow)
+            {
+                _cyRow = _TextMetric.tmHeight;
+            }
+        }
+    }
+
     SIZE size = {0, 0};
 
     _cxTitle = max(_cxTitle, size.cx + 2 * GetSystemMetrics(SM_CXFRAME));
@@ -578,6 +599,9 @@ void CCandidateWindow::_HandleMouseMsg(_In_ UINT mouseMsg, _In_ POINT point)
     case WM_LBUTTONUP:
         _OnLButtonUp(point);
         break;
+    case WM_RBUTTONUP:
+        _OnRButtonDown(point);
+        break;
     }
 }
 
@@ -630,6 +654,59 @@ void CCandidateWindow::_OnLButtonDown(POINT pt)
     // Mouse interaction with the candidate window is disabled (no item
     // selection, no scrollbar).
     (void)pt;
+}
+
+//+---------------------------------------------------------------------------
+//
+// CCandidateWindow::_SetStatusWindow
+//
+//  Hands the candidate window a pointer to the floating status bar so its
+//  context menu can show/hide that bar on request.
+//
+//----------------------------------------------------------------------------
+
+void CCandidateWindow::_SetStatusWindow(_In_opt_ CStatusWindow* pStatusWnd)
+{
+    _pStatusWnd = pStatusWnd;
+}
+
+void CCandidateWindow::_SetTextService(_In_ CDIME* pTextService)
+{
+    _pTextService = pTextService;
+}
+
+//+---------------------------------------------------------------------------
+//
+// CCandidateWindow::_OnRButtonDown
+//
+//  Right-click context menu (shared with the status bar via
+//  DimeShowImeContextMenu). "功能设置" is a placeholder; "隐藏状态栏" hides
+//  the floating status bar through the pointer supplied by the presenter.
+//
+//----------------------------------------------------------------------------
+
+void CCandidateWindow::_OnRButtonDown(POINT pt)
+{
+    POINT screenPt = pt;
+    ClientToScreen(_GetWnd(), &screenPt);
+
+    BOOL isVisible = (_pStatusWnd != nullptr) ? _pStatusWnd->_IsWindowVisible() : FALSE;
+    switch (DimeShowImeContextMenu(_GetWnd(), screenPt, isVisible))
+    {
+        case DIME_CMD_SETTINGS:
+        DimeShowConfigDialog(_GetWnd(), _pTextService);
+        break;
+
+    case DIME_CMD_TOGGLE_STATUSBAR:
+        if (_pStatusWnd != nullptr)
+        {
+            _pStatusWnd->_SetHiddenByUser(isVisible);
+            _pStatusWnd->_Show(!isVisible);
+        }
+        break;
+    default:
+        break;
+    }
 }
 
 //+---------------------------------------------------------------------------

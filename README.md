@@ -18,7 +18,7 @@
 
 ## 许可证
 
-- **代码**：以 MIT 许可发布，见仓库根目录的 `LICENSE` 文件（版权 (c) 2026 cnDenis）。
+- **代码**：以 MIT 许可发布，见仓库根目录的 `LICENSE` 文件。
 - **派生来源**：本项目源码修改自微软 [Windows-classic-samples](https://github.com/microsoft/Windows-classic-samples) 中的 **SampleIME**（TSF 示例输入法）。
-- **码表数据**：随包自带的五笔码表为海峰98，版权归原作者，不属于代码 MIT 许可范围；自带的拼音码表为SampleIME中的全拼码表.
+- **码表数据**：随包自带的五笔码表为海峰98，版权归原作者，不属于代码 MIT 许可范围；自带的拼音码表来自 SampleIME 全拼码表。
 

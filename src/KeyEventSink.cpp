@@ -1,9 +1,8 @@
-// THIS CODE AND INFORMATION IS PROVIDED "AS IS" WITHOUT WARRANTY OF
-// ANY KIND, EITHER EXPRESSED OR IMPLIED, INCLUDING BUT NOT LIMITED TO
-// THE IMPLIED WARRANTIES OF MERCHANTABILITY AND/OR FITNESS FOR A
-// PARTICULAR PURPOSE.
+// Copyright (c) Microsoft Corporation.
+// Copyright (c) 2026 cnDenis
 //
-// Copyright (c) Microsoft Corporation. All rights reserved
+// SPDX-License-Identifier: MIT
+
 
 #include "Private.h"
 #include "Globals.h"
@@ -136,6 +135,19 @@ BOOL CDIME::_IsKeyEaten(_In_ ITfContext *pContext, UINT codeIn, _Out_ UINT *pCod
         {
             return TRUE;
         }
+    }
+
+    // 小键盘 + - * / . 始终按英文半角输出, 不走中文标点 / 全角转换.
+    if (codeIn == VK_ADD || codeIn == VK_SUBTRACT || codeIn == VK_MULTIPLY ||
+        codeIn == VK_DIVIDE || codeIn == VK_DECIMAL)
+    {
+        return isTouchKeyboardSpecialKeys;
+    }
+
+    // 数字后紧跟 , 或 . 时按英文半角输出 (可在管理面板关闭).
+    if (pCompositionProcessorEngine->ShouldOutputEnglishCommaOrPeriod(wch))
+    {
+        return isTouchKeyboardSpecialKeys;
     }
 
     //
@@ -285,6 +297,14 @@ STDAPI CDIME::OnTestKeyDown(ITfContext *pContext, WPARAM wParam, LPARAM lParam, 
     UINT code = 0;
     *pIsEaten = _IsKeyEaten(pContext, (UINT)wParam, &code, &wch, &KeystrokeState);
 
+    // When the key is not eaten, OnKeyDown is not called. Digits usually pass
+    // through, so track "last key was digit" here or the follow-up ',' / '.'
+    // rule never sees them.
+    if (!*pIsEaten && _pCompositionProcessorEngine)
+    {
+        _pCompositionProcessorEngine->UpdateLastKeyWasDigit(code, wch);
+    }
+
     if (KeystrokeState.Category == CATEGORY_INVOKE_COMPOSITION_EDIT_SESSION)
     {
         //
@@ -315,6 +335,13 @@ STDAPI CDIME::OnKeyDown(ITfContext *pContext, WPARAM wParam, LPARAM lParam, BOOL
     UINT code = 0;
 
     *pIsEaten = _IsKeyEaten(pContext, (UINT)wParam, &code, &wch, &KeystrokeState);
+
+    // Eaten keys reach OnKeyDown; update digit-follow state after the eat check
+    // so ',' / '.' still see the previous key's digit flag.
+    if (_pCompositionProcessorEngine)
+    {
+        _pCompositionProcessorEngine->UpdateLastKeyWasDigit(code, wch);
+    }
 
     if (*pIsEaten)
     {

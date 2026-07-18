@@ -1,8 +1,7 @@
-// THIS CODE AND INFORMATION IS PROVIDED "AS IS" WITHOUT WARRANTY OF
-// ANY KIND, EITHER EXPRESSED OR IMPLIED, INCLUDING BUT NOT LIMITED TO
-// THE IMPLIED WARRANTIES OF MERCHANTABILITY AND/OR FITNESS FOR A
-// PARTICULAR PURPOSE.
+// Copyright (c) 2026 cnDenis
 //
+// SPDX-License-Identifier: MIT
+
 // build_bindict: offline compiler that turns a DIME text dictionary
 // ("code"="word", UTF-16LE) into the precompiled binary format (.bin).
 //
@@ -16,6 +15,7 @@
 // See doc/BinaryDictionaryFormat.md and BinaryDictFormat.h for the layout.
 // Parsing intentionally mirrors CDictionaryParser::ParseLine and
 // CDictionaryIndex::Build so the produced .bin matches the in-memory index.
+
 
 #define WIN32_LEAN_AND_MEAN
 #include <windows.h>

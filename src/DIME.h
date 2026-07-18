@@ -1,9 +1,8 @@
-// THIS CODE AND INFORMATION IS PROVIDED "AS IS" WITHOUT WARRANTY OF
-// ANY KIND, EITHER EXPRESSED OR IMPLIED, INCLUDING BUT NOT LIMITED TO
-// THE IMPLIED WARRANTIES OF MERCHANTABILITY AND/OR FITNESS FOR A
-// PARTICULAR PURPOSE.
+// Copyright (c) Microsoft Corporation.
+// Copyright (c) 2026 cnDenis
 //
-// Copyright (c) Microsoft Corporation. All rights reserved
+// SPDX-License-Identifier: MIT
+
 
 #pragma once
 
@@ -27,7 +26,8 @@ class CDIME : public ITfTextInputProcessorEx,
     public ITfActiveLanguageProfileNotifySink,
     public ITfThreadFocusSink,
     public ITfFunctionProvider,
-    public ITfFnGetPreferredTouchKeyboardLayout
+    public ITfFnGetPreferredTouchKeyboardLayout,
+    public ITfFnConfigure
 {
 public:
     CDIME();
@@ -88,6 +88,9 @@ public:
 
     // ITfFnGetPreferredTouchKeyboardLayout, it is the Optimized layout feature.
     STDMETHODIMP GetLayout(_Out_ TKBLayoutType *ptkblayoutType, _Out_ WORD *pwPreferredLayoutId);
+
+    // ITfFnConfigure: system language settings "Options" button.
+    STDMETHODIMP Show(HWND hwndParent, LANGID langid, REFGUID rguidProfile);
 
     // CClassFactory factory callback
     static HRESULT CreateInstance(_In_ IUnknown *pUnkOuter, REFIID riid, _Outptr_ void **ppvObj);
@@ -269,4 +272,9 @@ private:
 
     // Support the search integration
     ITfFnSearchCandidateProvider* _pITfFnSearchCandidateProvider;
+
+public:
+    // Exposed so other DIME UI elements (e.g. the candidate window's context
+    // menu) can request hiding the floating status bar.
+    CStatusWindow* _GetStatusWindow() const { return _pStatusWindow; }
 };

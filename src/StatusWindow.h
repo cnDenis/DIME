@@ -1,9 +1,7 @@
-// THIS CODE AND INFORMATION IS PROVIDED "AS IS" WITHOUT WARRANTY OF
-// ANY KIND, EITHER EXPRESSED OR IMPLIED, INCLUDING BUT NOT LIMITED TO
-// THE IMPLIED WARRANTIES OF MERCHANTABILITY AND/OR FITNESS FOR A
-// PARTICULAR PURPOSE.
+// Copyright (c) 2026 cnDenis
 //
-// Copyright (c) Microsoft Corporation. All rights reserved.
+// SPDX-License-Identifier: MIT
+
 
 #pragma once
 
@@ -48,6 +46,10 @@ public:
     virtual void _OnPaint(_In_ HDC dcHandle, _In_ PAINTSTRUCT *pps);
     virtual void _OnLButtonDown(POINT pt);
     virtual void _OnLButtonUp(POINT pt);
+    void _OnRButtonDown(POINT pt);
+    void _SetHiddenByUser(BOOL hidden);
+    BOOL _IsHiddenByUser() const { return _isHiddenByUser; }
+    void _LoadHiddenState();
     virtual void _OnMouseMove(POINT pt);
 
 private:
@@ -79,6 +81,8 @@ private:
     RECT _rcIcon;
     RECT _rcItems[STATUS_ITEM_COUNT];
     int  _hoverItem;
+
+    BOOL _isHiddenByUser = FALSE;   // user chose to hide via the context menu
 
     BOOL _isDragging;
     POINT _dragOffset;

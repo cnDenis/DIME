@@ -1,5 +1,7 @@
-// THIS CODE AND IS PROVIDED "AS IS" WITHOUT WARRANTY OF MERCHANTABILITY OR
-// FITNESS FOR A PARTICULAR PURPOSE. See BinaryDictionaryEngine.h.
+// Copyright (c) 2026 cnDenis
+//
+// SPDX-License-Identifier: MIT
+
 
 #include "Private.h"
 #include "BinaryDictionaryEngine.h"
@@ -91,7 +93,8 @@ CBinaryDictionaryEngine::CBinaryDictionaryEngine(LCID locale, _In_ CFile *pDicti
       _pReverseEntries(nullptr),
       _pPool(nullptr),
       _isBuilt(FALSE),
-      _onlyCommon(FALSE)
+      _onlyCommon(FALSE),
+      _emptyCodeSearchFull(TRUE)
 {
     if (!pDictionaryFile)
     {
@@ -298,6 +301,14 @@ VOID CBinaryDictionaryEngine::CollectWord(_In_ CStringRange *pKeyCode, _Inout_ C
         UINT collected = 0;
         _AppendCodeWords(*it, pItemList, 0, collected, nullptr);
     }
+
+    // 常用字模式下空码: 回退检索全码表.
+    if (pItemList->Count() == 0 && _onlyCommon && _emptyCodeSearchFull)
+    {
+        _onlyCommon = FALSE;
+        CollectWord(pKeyCode, pItemList);
+        _onlyCommon = TRUE;
+    }
 }
 
 //+---------------------------------------------------------------------------
@@ -372,6 +383,14 @@ VOID CBinaryDictionaryEngine::CollectWordByPrefix(_In_ CStringRange *pKeyCode, _
             return;
         }
     }
+
+    // 常用字模式下空码: 回退检索全码表.
+    if (pItemList->Count() == 0 && _onlyCommon && _emptyCodeSearchFull)
+    {
+        _onlyCommon = FALSE;
+        CollectWordByPrefix(pKeyCode, pItemList, maxCount, pHasMore);
+        _onlyCommon = TRUE;
+    }
 }
 
 //+---------------------------------------------------------------------------
@@ -436,6 +455,14 @@ VOID CBinaryDictionaryEngine::CollectWordForWildcard(_In_ CStringRange *pKeyCode
             }
         }
     }
+
+    // 常用字模式下空码: 回退检索全码表.
+    if (pItemList->Count() == 0 && _onlyCommon && _emptyCodeSearchFull)
+    {
+        _onlyCommon = FALSE;
+        CollectWordForWildcard(pKeyCode, pItemList, maxCount, pHasMore);
+        _onlyCommon = TRUE;
+    }
 }
 
 //+---------------------------------------------------------------------------
@@ -483,6 +510,14 @@ VOID CBinaryDictionaryEngine::CollectWordFromConvertedStringForWildcard(_In_ CSt
         UINT collected = 0;
         BOOL hasMore = FALSE;
         _AppendCodeWords(*it, pItemList, 0, collected, &hasMore);
+    }
+
+    // 常用字模式下空码: 回退检索全码表.
+    if (pItemList->Count() == 0 && _onlyCommon && _emptyCodeSearchFull)
+    {
+        _onlyCommon = FALSE;
+        CollectWordFromConvertedStringForWildcard(pString, pItemList);
+        _onlyCommon = TRUE;
     }
 }
 

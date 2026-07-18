@@ -1,9 +1,8 @@
-// THIS CODE AND INFORMATION IS PROVIDED "AS IS" WITHOUT WARRANTY OF
-// ANY KIND, EITHER EXPRESSED OR IMPLIED, INCLUDING BUT NOT LIMITED TO
-// THE IMPLIED WARRANTIES OF MERCHANTABILITY AND/OR FITNESS FOR A
-// PARTICULAR PURPOSE.
+// Copyright (c) Microsoft Corporation.
+// Copyright (c) 2026 cnDenis
 //
-// Copyright (c) Microsoft Corporation. All rights reserved
+// SPDX-License-Identifier: MIT
+
 
 #include "Private.h"
 #include "globals.h"
@@ -12,6 +11,7 @@
 #include "CompositionProcessorEngine.h"
 #include "Compartment.h"
 #include "StatusWindow.h"
+#include "ConfigDialog.h"
 
 #include <vector>
 #include <algorithm>
@@ -262,6 +262,21 @@ void CDIME::_RefreshStatusWindow()
         return;
     }
 
+    // Re-read the persisted "hide" choice on every refresh. The IME runs as one
+    // CDIME instance per thread/process, each with its own status window, so a
+    // hide chosen in one place only sets that instance's in-memory flag. Reading
+    // the registry here keeps every other instance in sync (and survives an IME
+    // restart), so the bar stays hidden no matter where it was hidden from.
+    _pStatusWindow->_LoadHiddenState();
+
+    // Respect an explicit "hide" chosen from the context menu: keep the bar
+    // hidden across refreshes until the user shows it again.
+    if (_pStatusWindow->_IsHiddenByUser())
+    {
+        _pStatusWindow->_Show(FALSE);
+        return;
+    }
+
     BOOL isOpen = FALSE;
     CCompartment CompartmentKeyboardOpen(_pThreadMgr, _tfClientId, GUID_COMPARTMENT_KEYBOARD_OPENCLOSE);
     if (FAILED(CompartmentKeyboardOpen._GetCompartmentBOOL(isOpen)))
@@ -411,9 +426,13 @@ STDAPI CDIME::QueryInterface(REFIID riid, _Outptr_ void **ppvObj)
     {
         *ppvObj = (ITfFunctionProvider *)this;
     }
+    else if (IsEqualIID(riid, IID_ITfFnConfigure))
+    {
+        *ppvObj = (ITfFnConfigure *)this;
+    }
     else if (IsEqualIID(riid, IID_ITfFunction))
     {
-        *ppvObj = (ITfFunction *)this;
+        *ppvObj = (ITfFunction *)(ITfFnConfigure *)this;
     }
     else if (IsEqualIID(riid, IID_ITfFnGetPreferredTouchKeyboardLayout))
     {
@@ -694,13 +713,30 @@ HRESULT CDIME::GetFunction(__RPC__in REFGUID rguid, __RPC__in REFIID riid, __RPC
 //----------------------------------------------------------------------------
 HRESULT CDIME::GetDisplayName(_Out_ BSTR *pbstrDisplayName)
 {
-    HRESULT hr = E_INVALIDARG;
-    if (pbstrDisplayName != nullptr)
+    if (pbstrDisplayName == nullptr)
     {
-        *pbstrDisplayName = nullptr;
-        hr = E_NOTIMPL;
+        return E_INVALIDARG;
     }
-    return hr;
+
+    *pbstrDisplayName = SysAllocString(L"DIME 设置");
+    return (*pbstrDisplayName != nullptr) ? S_OK : E_OUTOFMEMORY;
+}
+
+//+---------------------------------------------------------------------------
+//
+// ITfFnConfigure::Show
+//
+// Called from Windows language settings "Options". May CoCreate a fresh,
+// unactivated CDIME; the config dialog falls back to the registry then.
+//----------------------------------------------------------------------------
+
+STDAPI CDIME::Show(HWND hwndParent, LANGID langid, REFGUID rguidProfile)
+{
+    langid;
+    rguidProfile;
+
+    DimeShowConfigDialog(hwndParent, this);
+    return S_OK;
 }
 
 //+---------------------------------------------------------------------------

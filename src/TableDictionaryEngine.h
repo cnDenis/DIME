@@ -1,9 +1,8 @@
-// THIS CODE AND INFORMATION IS PROVIDED "AS IS" WITHOUT WARRANTY OF
-// ANY KIND, EITHER EXPRESSED OR IMPLIED, INCLUDING BUT NOT LIMITED TO
-// THE IMPLIED WARRANTIES OF MERCHANTABILITY AND/OR FITNESS FOR A
-// PARTICULAR PURPOSE.
+// Copyright (c) Microsoft Corporation.
+// Copyright (c) 2026 cnDenis
 //
-// Copyright (c) Microsoft Corporation. All rights reserved
+// SPDX-License-Identifier: MIT
+
 
 #pragma once
 
@@ -40,6 +39,9 @@ public:
     // "Only common characters" filter (see CBinaryDictionaryEngine). Forwarded
     // to the binary reader; the text fallback path does not filter.
     void SetOnlyCommon(BOOL f);
+    // 空码检索全码表: forwarded to the binary reader.
+    void SetEmptyCodeSearchFull(BOOL f);
+    BOOL IsEmptyCodeSearchFull() const;
 
 private:
     CDictionaryIndex* _pIndex;

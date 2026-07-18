@@ -3,6 +3,8 @@ name: Build and Package
 # Build the DIME IME (x64 + x86) and produce the Inno Setup installer on every
 # push / PR. When a version tag (v*.*.*) is pushed, the installer is also
 # attached to a GitHub Release.
+# Installer AppVersion: exact v* tag on the commit wins; otherwise
+# <src/Version.h>-<yyyyMMdd>.
 
 on:
   push:
@@ -65,15 +67,35 @@ jobs:
         id: version
         shell: pwsh
         run: |
+          $tag = $null
           if ($env:GITHUB_REF -like 'refs/tags/v*') {
-              $v = $env:GITHUB_REF -replace 'refs/tags/v', ''
+            $tag = $env:GITHUB_REF -replace 'refs/tags/v', ''
           } else {
-              $date = (Get-Date).ToString('yyyyMMdd')
-              $sha  = (git rev-parse --short=6 HEAD).Trim()
-              $v = "$date-$sha"
+            # Off-tag describe fails with a non-zero code; handle it and clear
+            # LASTEXITCODE so the step does not inherit that failure.
+            $exact = (git describe --tags --exact-match 2>$null)
+            if ($LASTEXITCODE -eq 0 -and $exact -match '^v(.+)$') {
+              $tag = $Matches[1]
+            }
+            $global:LASTEXITCODE = 0
           }
-          echo "version=$v" >> $env:GITHUB_OUTPUT
-          echo "Version: $v"
+          if ($tag) {
+            $v = $tag
+            echo "Version: $v (from git tag)"
+          } else {
+            $h = Get-Content -Raw src/Version.h
+            function Get-Ver([string]$name) {
+              if ($h -match "(?m)^#define\s+$([regex]::Escape($name))\s+(\d+)") {
+                return $Matches[1]
+              }
+              throw "Failed to read $name from src/Version.h"
+            }
+            $base = "$(Get-Ver 'DIME_VER_MAJOR').$(Get-Ver 'DIME_VER_MINOR').$(Get-Ver 'DIME_VER_PATCH')"
+            $date = (Get-Date).ToString('yyyyMMdd')
+            $v = "$base-$date"
+            echo "Version: $v (from Version.h + date)"
+          }
+          "version=$v" | Out-File -FilePath $env:GITHUB_OUTPUT -Append -Encoding utf8
 
       - name: Build installer (DIME_<version>_Setup.exe)
         run: |

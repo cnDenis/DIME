@@ -1,9 +1,8 @@
-// THIS CODE AND INFORMATION IS PROVIDED "AS IS" WITHOUT WARRANTY OF
-// ANY KIND, EITHER EXPRESSED OR IMPLIED, INCLUDING BUT NOT LIMITED TO
-// THE IMPLIED WARRANTIES OF MERCHANTABILITY AND/OR FITNESS FOR A
-// PARTICULAR PURPOSE.
+// Copyright (c) Microsoft Corporation.
+// Copyright (c) 2026 cnDenis
 //
-// Copyright (c) Microsoft Corporation. All rights reserved
+// SPDX-License-Identifier: MIT
+
 
 #include "Private.h"
 #include "Globals.h"
@@ -193,6 +192,8 @@ HRESULT CDIME::_HandleCompositionInput(TfEditCookie ec, _In_ ITfContext *pContex
     // Temporary English mode (triggered by ';' on an empty buffer):
     // switch into English mode and show the "英" indicator, then return.
     // The ';' itself is consumed as the mode switch and is NOT added to the buffer.
+    // Note: ':' (Shift+;) is not handled here; it is committed via punctuation /
+    // full-half-width paths in _IsKeyEaten instead of entering English mode.
     if (wch == L';' && pCompositionProcessorEngine->GetVirtualKeyLength() == 0 &&
         !pCompositionProcessorEngine->IsEnglishInput())
     {
@@ -231,6 +232,46 @@ HRESULT CDIME::_HandleCompositionInput(TfEditCookie ec, _In_ ITfContext *pContex
     if (pCompositionProcessorEngine->IsEnglishInput())
     {
         DWORD_PTR engLen = pCompositionProcessorEngine->GetVirtualKeyLength();
+
+        // Double-tap ';': first ';' entered English mode with an empty buffer;
+        // second ';' commits one semicolon (respecting 中/英标点 and 全/半角)
+        // and exits English mode.
+        if (wch == L';' && engLen == 0)
+        {
+            WCHAR outCh = L';';
+            BOOL isChinesePunctuation = FALSE;
+            CCompartment compartmentPunct(_pThreadMgr, _tfClientId, Global::DIMEGuidCompartmentPunctuation);
+            compartmentPunct._GetCompartmentBOOL(isChinesePunctuation);
+            if (isChinesePunctuation)
+            {
+                outCh = pCompositionProcessorEngine->GetPunctuation(L';');
+                if (!outCh)
+                {
+                    outCh = L';';
+                }
+            }
+            else
+            {
+                BOOL isFullWidth = FALSE;
+                CCompartment compartmentFw(_pThreadMgr, _tfClientId, Global::DIMEGuidCompartmentDoubleSingleByte);
+                compartmentFw._GetCompartmentBOOL(isFullWidth);
+                if (isFullWidth)
+                {
+                    outCh = Global::FullWidthCharTable[L';' - 0x20];
+                }
+            }
+
+            pCompositionProcessorEngine->SetEnglishInput(FALSE);
+            DIME_DEBUG_LOG(L"english mode OFF (;; commit semicolon)");
+
+            CStringRange semicolonString;
+            semicolonString.Set(&outCh, 1);
+            HRESULT hr = _AddCharAndFinalize(ec, pContext, &semicolonString);
+            _HandleComplete(ec, pContext);
+            tfSelection.range->Release();
+            return hr;
+        }
+
         if (engLen < ENGLISH_MAX_CODE_LENGTH)
         {
             pCompositionProcessorEngine->AddVirtualKey(wch);

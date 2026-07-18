@@ -1,6 +1,7 @@
 // Microsoft Visual C++ generated resource script.
 //
 #include "resource.h"
+#include "Version.h"
 /////////////////////////////////////////////////////////////////////////////
 // English (United States) resources
 
@@ -29,8 +30,8 @@ IDI_PUNCTUATION_OFF     ICON                    "..\\image\\PunctuationOff.ico"
 //
 
 IDR_VERSION2 VERSIONINFO
- FILEVERSION 1,0,0,1
- PRODUCTVERSION 1,0,0,1
+ FILEVERSION DIME_VERSION_COMMA
+ PRODUCTVERSION DIME_VERSION_COMMA
  FILEFLAGSMASK 0x3fL
 #ifdef _DEBUG
  FILEFLAGS 0x1L
@@ -47,12 +48,12 @@ BEGIN
         BEGIN
             VALUE "CompanyName", "MSFT"
             VALUE "FileDescription", "Diming Wubi IME"
-            VALUE "FileVersion", "1.0.0.1"
+            VALUE "FileVersion", DIME_VERSION_STRING
             VALUE "InternalName", "dime.dll"
             VALUE "LegalCopyright", "Copyright (C)"
             VALUE "OriginalFilename", "dime.dll"
             VALUE "ProductName", "Diming Wubi"
-            VALUE "ProductVersion", "1.0.0.1"
+            VALUE "ProductVersion", DIME_VERSION_STRING
         END
     END
     BLOCK "VarFileInfo"

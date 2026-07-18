@@ -1,12 +1,9 @@
-//////////////////////////////////////////////////////////////////////
+// Copyright (c) Microsoft Corporation.
+// Copyright (c) 2026 cnDenis
 //
-//  Copyright (C) Microsoft Corporation.  All rights reserved.
+// SPDX-License-Identifier: MIT
 //
-//  DisplayString.h
-//
-//          CDisplayString declaration.
-//
-//////////////////////////////////////////////////////////////////////
+// DisplayString.h — CDisplayString declaration.
 
 #pragma once
 

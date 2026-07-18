@@ -44,6 +44,8 @@ set(SOURCE_FILES
     "src/ShadowWindow.cpp"
     "src/StartComposition.cpp"
     "src/StatusWindow.cpp"
+    "src/ContextMenu.cpp"
+    "src/ConfigDialog.cpp"
     "src/TableDictionaryEngine.cpp"
     "src/DIME.cpp"
     "src/TextEditSink.cpp"
@@ -90,12 +92,15 @@ set(HEADER_FILES
     "src/DIME.h"
     "src/ShadowWindow.h"
     "src/StatusWindow.h"
+    "src/ContextMenu.h"
+    "src/ConfigDialog.h"
     "src/stdafx.h"
     "src/TableDictionaryEngine.h"
     "src/TfInputProcessorProfile.h"
     "src/TfTextLayoutSink.h"
     "src/TipCandidateList.h"
     "src/TipCandidateString.h"
+    "src/Version.h"
 )
 
 # Resource Files
@@ -145,6 +150,7 @@ endif()
 target_link_libraries(dime PRIVATE
     shlwapi
     msimg32
+    shell32
 )
 
 # ---------------------------------------------------------------------------

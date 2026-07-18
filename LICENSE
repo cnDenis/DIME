@@ -1,5 +1,10 @@
 MIT License
 
+This project incorporates code from Microsoft SampleIME
+(Windows-classic-samples) covered by the following terms:
+Copyright (c) Microsoft Corporation
+
+Subsequent modifications and additional code:
 Copyright (c) 2026 cnDenis
 
 Permission is hereby granted, free of charge, to any person obtaining a copy

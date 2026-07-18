@@ -1,9 +1,8 @@
-// THIS CODE AND INFORMATION IS PROVIDED "AS IS" WITHOUT WARRANTY OF
-// ANY KIND, EITHER EXPRESSED OR IMPLIED, INCLUDING BUT NOT LIMITED TO
-// THE IMPLIED WARRANTIES OF MERCHANTABILITY AND/OR FITNESS FOR A
-// PARTICULAR PURPOSE.
+// Copyright (c) Microsoft Corporation.
+// Copyright (c) 2026 cnDenis
 //
-// Copyright (c) Microsoft Corporation. All rights reserved
+// SPDX-License-Identifier: MIT
+
 
 
 #pragma once
@@ -13,6 +12,9 @@
 #include "ShadowWindow.h"
 #include "DIMEBaseStructure.h"
 #include "define.h"
+
+class CStatusWindow;
+class CDIME;
 
 enum CANDWND_ACTION
 {
@@ -41,6 +43,9 @@ public:
     void _OnLButtonDown(POINT pt);
     void _OnLButtonUp(POINT pt);
     void _OnMouseMove(POINT pt);
+    void _OnRButtonDown(POINT pt);
+    void _SetStatusWindow(_In_opt_ CStatusWindow* pStatusWnd);
+    void _SetTextService(_In_ CDIME* pTextService);
 
     void _AddString(_Inout_ CCandidateListItem *pCandidateItem, _In_ BOOL isAddFindKeyCode);
     void _SetKeystrokeCode(_In_reads_(length) const WCHAR *pwch, DWORD_PTR length);
@@ -122,6 +127,12 @@ private:
 
     CANDWNDCALLBACK _pfnCallback;
     void* _pObj;
+
+    CStatusWindow* _pStatusWnd = nullptr;   // supplied by the presenter so the
+                                            // context menu can hide the bar
+
+    CDIME* _pTextService = nullptr;         // supplied by the presenter so the
+                                            // context menu can open the config dialog
 
     CShadowWindow* _pShadowWnd;
 

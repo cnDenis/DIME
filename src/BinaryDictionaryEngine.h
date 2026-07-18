@@ -1,13 +1,13 @@
-// THIS CODE AND INFORMATION IS PROVIDED "AS IS" WITHOUT WARRANTY OF
-// ANY KIND, EITHER EXPRESSED OR IMPLIED, INCLUDING BUT NOT LIMITED TO
-// THE IMPLIED WARRANTIES OF MERCHANTABILITY AND/OR FITNESS FOR A
-// PARTICULAR PURPOSE.
+// Copyright (c) 2026 cnDenis
 //
+// SPDX-License-Identifier: MIT
+
 // CBinaryDictionaryEngine: mmap-based reader for the precompiled binary
 // dictionary (.bin, see BinaryDictFormat.h / doc/BinaryDictionaryFormat.md).
 // It mirrors the lookup API of CTableDictionaryEngine but performs zero
 // parsing at load time and returns CStringRange views that point directly
 // into the memory-mapped string pool (no per-entry string copies).
+
 
 #pragma once
 
@@ -51,6 +51,11 @@ public:
     void SetOnlyCommon(BOOL f) { _onlyCommon = f; }
     BOOL IsOnlyCommon() const { return _onlyCommon; }
 
+    // When only-common mode yields no candidates for a code, retry against the
+    // full dictionary (空码检索全码表).
+    void SetEmptyCodeSearchFull(BOOL f) { _emptyCodeSearchFull = f; }
+    BOOL IsEmptyCodeSearchFull() const { return _emptyCodeSearchFull; }
+
 private:
     const WCHAR* _PoolStr(uint32_t offset) const { return reinterpret_cast<const WCHAR*>(_pPool + offset); }
     const WCHAR* _CodeStr(const DimeBinDict::CodeEntry& ce) const { return _PoolStr(ce.codeOffset); }
@@ -78,5 +83,6 @@ private:
     const BYTE* _pPool;
     BOOL _isBuilt;
     BOOL _onlyCommon;
+    BOOL _emptyCodeSearchFull;
     DictConfig _config;
 };

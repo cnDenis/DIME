@@ -1,9 +1,8 @@
-﻿// THIS CODE AND INFORMATION IS PROVIDED "AS IS" WITHOUT WARRANTY OF
-// ANY KIND, EITHER EXPRESSED OR IMPLIED, INCLUDING BUT NOT LIMITED TO
-// THE IMPLIED WARRANTIES OF MERCHANTABILITY AND/OR FITNESS FOR A
-// PARTICULAR PURPOSE.
+﻿// Copyright (c) Microsoft Corporation.
+// Copyright (c) 2026 cnDenis
 //
-// Copyright (c) Microsoft Corporation. All rights reserved
+// SPDX-License-Identifier: MIT
+
 
 #include "Private.h"
 #include "DIME.h"
@@ -110,6 +109,12 @@ CCompositionProcessorEngine::CCompositionProcessorEngine()
     _isPinyinInput = FALSE;
     _isEnglishInput = FALSE;
     _isOnlyCommon = FALSE;
+    _emptyCodeSearchFull = TRUE;
+    _englishCommaPeriodAfterDigit = TRUE;
+    _lastKeyWasDigit = FALSE;
+    _hotkeyOnlyCommonEnabled = TRUE;
+    _hotkeyPunctuationEnabled = TRUE;
+    _hotkeyDoubleSingleByteEnabled = TRUE;
 
     _langid = 0xffff;
     _guidProfile = GUID_NULL;
@@ -141,6 +146,8 @@ CCompositionProcessorEngine::CCompositionProcessorEngine()
     _candidateListPhraseModifier = 0;
 
     _candidateWndWidth = CAND_WINDOW_WIDTH_PX;
+    _candidatePageSize = 10;
+    _candidateFontSize = 0;
 
     _imeModeSnapshotValid = FALSE;
     _imeModeSnapshotFullWidth = FALSE;
@@ -935,10 +942,43 @@ void CCompositionProcessorEngine::SetupPreserved(_In_ ITfThreadMgr *pThreadMgr, 
     preservedKeyOnlyCommon.uModifiers = TF_MOD_CONTROL;
     SetPreservedKey(Global::DIMEGuidOnlyCommonPreserveKey, preservedKeyOnlyCommon, L"OnlyCommon (Ctrl+M)", &_PreservedKey_OnlyCommon);
 
+    // Hotkey enable flags are persisted; load before registering so a disabled
+    // shortcut is not claimed from the system.
+    {
+        CRegKey reg;
+        if (reg.Open(HKEY_CURRENT_USER, L"Software\\DIME") == ERROR_SUCCESS)
+        {
+            DWORD dw = 1;
+            if (reg.QueryDWORDValue(L"HotkeyOnlyCommon", dw) == ERROR_SUCCESS)
+            {
+                _hotkeyOnlyCommonEnabled = (dw != 0) ? TRUE : FALSE;
+            }
+            dw = 1;
+            if (reg.QueryDWORDValue(L"HotkeyPunctuation", dw) == ERROR_SUCCESS)
+            {
+                _hotkeyPunctuationEnabled = (dw != 0) ? TRUE : FALSE;
+            }
+            dw = 1;
+            if (reg.QueryDWORDValue(L"HotkeyDoubleSingleByte", dw) == ERROR_SUCCESS)
+            {
+                _hotkeyDoubleSingleByteEnabled = (dw != 0) ? TRUE : FALSE;
+            }
+        }
+    }
+
     InitPreservedKey(&_PreservedKey_IMEMode, pThreadMgr, tfClientId);
-    InitPreservedKey(&_PreservedKey_DoubleSingleByte, pThreadMgr, tfClientId);
-    InitPreservedKey(&_PreservedKey_Punctuation, pThreadMgr, tfClientId);
-    InitPreservedKey(&_PreservedKey_OnlyCommon, pThreadMgr, tfClientId);
+    if (_hotkeyDoubleSingleByteEnabled)
+    {
+        InitPreservedKey(&_PreservedKey_DoubleSingleByte, pThreadMgr, tfClientId);
+    }
+    if (_hotkeyPunctuationEnabled)
+    {
+        InitPreservedKey(&_PreservedKey_Punctuation, pThreadMgr, tfClientId);
+    }
+    if (_hotkeyOnlyCommonEnabled)
+    {
+        InitPreservedKey(&_PreservedKey_OnlyCommon, pThreadMgr, tfClientId);
+    }
 
     return;
 }
@@ -1062,7 +1102,8 @@ void CCompositionProcessorEngine::OnPreservedKey(REFGUID rguid, _Out_ BOOL *pIsE
     }
     else if (IsEqualGUID(rguid, _PreservedKey_DoubleSingleByte.Guid))
     {
-        if (!CheckShiftKeyOnly(&_PreservedKey_DoubleSingleByte.TSFPreservedKeyTable))
+        if (!_hotkeyDoubleSingleByteEnabled ||
+            !CheckShiftKeyOnly(&_PreservedKey_DoubleSingleByte.TSFPreservedKeyTable))
         {
             *pIsEaten = FALSE;
             return;
@@ -1072,7 +1113,8 @@ void CCompositionProcessorEngine::OnPreservedKey(REFGUID rguid, _Out_ BOOL *pIsE
     }
     else if (IsEqualGUID(rguid, _PreservedKey_Punctuation.Guid))
     {
-        if (!CheckShiftKeyOnly(&_PreservedKey_Punctuation.TSFPreservedKeyTable))
+        if (!_hotkeyPunctuationEnabled ||
+            !CheckShiftKeyOnly(&_PreservedKey_Punctuation.TSFPreservedKeyTable))
         {
             *pIsEaten = FALSE;
             return;
@@ -1082,6 +1124,11 @@ void CCompositionProcessorEngine::OnPreservedKey(REFGUID rguid, _Out_ BOOL *pIsE
     }
     else if (IsEqualGUID(rguid, _PreservedKey_OnlyCommon.Guid))
     {
+        if (!_hotkeyOnlyCommonEnabled)
+        {
+            *pIsEaten = FALSE;
+            return;
+        }
         ToggleOnlyCommon(pThreadMgr, tfClientId);
         *pIsEaten = TRUE;
     }
@@ -1154,21 +1201,289 @@ void CCompositionProcessorEngine::ToggleOnlyCommon(_In_ ITfThreadMgr *pThreadMgr
     NotifyInputModeChanged(pThreadMgr);
 }
 
+void CCompositionProcessorEngine::SetDoubleSingleByte(_In_ ITfThreadMgr *pThreadMgr, TfClientId tfClientId, BOOL isFullWidth)
+{
+    CCompartment CompartmentDoubleSingleByte(pThreadMgr, tfClientId, Global::DIMEGuidCompartmentDoubleSingleByte);
+    CompartmentDoubleSingleByte._SetCompartmentBOOL(isFullWidth);
+
+    BOOL isChinesePunctuation = FALSE;
+    CCompartment CompartmentPunctuation(pThreadMgr, tfClientId, Global::DIMEGuidCompartmentPunctuation);
+    CompartmentPunctuation._GetCompartmentBOOL(isChinesePunctuation);
+    _SaveSettings(isFullWidth, isChinesePunctuation);
+    NotifyInputModeChanged(pThreadMgr);
+}
+
+void CCompositionProcessorEngine::SetPunctuation(_In_ ITfThreadMgr *pThreadMgr, TfClientId tfClientId, BOOL isChinesePunctuation)
+{
+    CCompartment CompartmentPunctuation(pThreadMgr, tfClientId, Global::DIMEGuidCompartmentPunctuation);
+    CompartmentPunctuation._SetCompartmentBOOL(isChinesePunctuation);
+
+    BOOL isFullWidth = FALSE;
+    CCompartment CompartmentDoubleSingleByte(pThreadMgr, tfClientId, Global::DIMEGuidCompartmentDoubleSingleByte);
+    CompartmentDoubleSingleByte._GetCompartmentBOOL(isFullWidth);
+    _SaveSettings(isFullWidth, isChinesePunctuation);
+    NotifyInputModeChanged(pThreadMgr);
+}
+
+void CCompositionProcessorEngine::SetOnlyCommon(_In_ ITfThreadMgr *pThreadMgr, TfClientId tfClientId, BOOL isOnlyCommon)
+{
+    CCompartment CompartmentOnlyCommon(pThreadMgr, tfClientId, Global::DIMEGuidCompartmentOnlyCommon);
+    CompartmentOnlyCommon._SetCompartmentBOOL(isOnlyCommon);
+
+    _isOnlyCommon = isOnlyCommon;
+    _WriteRegistryOnlyCommon(isOnlyCommon);
+
+    if (_pTableDictionaryEngine)
+    {
+        _pTableDictionaryEngine->SetOnlyCommon(_isOnlyCommon);
+    }
+    if (_pPinyinDictionaryEngine)
+    {
+        _pPinyinDictionaryEngine->SetOnlyCommon(_isOnlyCommon);
+    }
+    if (_pTextService)
+    {
+        _pTextService->_ResetInputForModeChange();
+    }
+    NotifyInputModeChanged(pThreadMgr);
+}
+
+void CCompositionProcessorEngine::SetEmptyCodeSearchFull(BOOL v)
+{
+    _emptyCodeSearchFull = v ? TRUE : FALSE;
+    if (_pTableDictionaryEngine)
+    {
+        _pTableDictionaryEngine->SetEmptyCodeSearchFull(_emptyCodeSearchFull);
+    }
+    if (_pPinyinDictionaryEngine)
+    {
+        _pPinyinDictionaryEngine->SetEmptyCodeSearchFull(_emptyCodeSearchFull);
+    }
+    CRegKey reg;
+    if (reg.Create(HKEY_CURRENT_USER, L"Software\\DIME") == ERROR_SUCCESS)
+    {
+        reg.SetDWORDValue(L"EmptyCodeSearchFull", _emptyCodeSearchFull ? 1 : 0);
+    }
+}
+
+void CCompositionProcessorEngine::SetEnglishCommaPeriodAfterDigit(BOOL v)
+{
+    _englishCommaPeriodAfterDigit = v ? TRUE : FALSE;
+    CRegKey reg;
+    if (reg.Create(HKEY_CURRENT_USER, L"Software\\DIME") == ERROR_SUCCESS)
+    {
+        reg.SetDWORDValue(L"EnglishCommaPeriodAfterDigit", _englishCommaPeriodAfterDigit ? 1 : 0);
+    }
+}
+
+void CCompositionProcessorEngine::UpdateLastKeyWasDigit(UINT uCode, WCHAR wch)
+{
+    if ((uCode >= L'0' && uCode <= L'9') ||
+        (uCode >= VK_NUMPAD0 && uCode <= VK_NUMPAD9) ||
+        (wch >= L'0' && wch <= L'9') ||
+        (wch >= 0xFF10 && wch <= 0xFF19))
+    {
+        _lastKeyWasDigit = TRUE;
+    }
+    else
+    {
+        _lastKeyWasDigit = FALSE;
+    }
+}
+
+BOOL CCompositionProcessorEngine::ShouldOutputEnglishCommaOrPeriod(WCHAR wch) const
+{
+    return _englishCommaPeriodAfterDigit && _lastKeyWasDigit &&
+        (wch == L',' || wch == L'.');
+}
+
+void CCompositionProcessorEngine::SetHotkeyOnlyCommonEnabled(BOOL v)
+{
+    BOOL enabled = v ? TRUE : FALSE;
+    if (_hotkeyOnlyCommonEnabled != enabled)
+    {
+        _hotkeyOnlyCommonEnabled = enabled;
+        if (_pThreadMgr && _tfClientId != TF_CLIENTID_NULL)
+        {
+            if (_hotkeyOnlyCommonEnabled)
+            {
+                InitPreservedKey(&_PreservedKey_OnlyCommon, _pThreadMgr, _tfClientId);
+            }
+            else
+            {
+                _PreservedKey_OnlyCommon.UninitPreservedKey(_pThreadMgr);
+            }
+        }
+    }
+
+    CRegKey reg;
+    if (reg.Create(HKEY_CURRENT_USER, L"Software\\DIME") == ERROR_SUCCESS)
+    {
+        reg.SetDWORDValue(L"HotkeyOnlyCommon", _hotkeyOnlyCommonEnabled ? 1 : 0);
+    }
+}
+
+void CCompositionProcessorEngine::SetHotkeyPunctuationEnabled(BOOL v)
+{
+    BOOL enabled = v ? TRUE : FALSE;
+    if (_hotkeyPunctuationEnabled != enabled)
+    {
+        _hotkeyPunctuationEnabled = enabled;
+        if (_pThreadMgr && _tfClientId != TF_CLIENTID_NULL)
+        {
+            if (_hotkeyPunctuationEnabled)
+            {
+                InitPreservedKey(&_PreservedKey_Punctuation, _pThreadMgr, _tfClientId);
+            }
+            else
+            {
+                _PreservedKey_Punctuation.UninitPreservedKey(_pThreadMgr);
+            }
+        }
+    }
+
+    CRegKey reg;
+    if (reg.Create(HKEY_CURRENT_USER, L"Software\\DIME") == ERROR_SUCCESS)
+    {
+        reg.SetDWORDValue(L"HotkeyPunctuation", _hotkeyPunctuationEnabled ? 1 : 0);
+    }
+}
+
+void CCompositionProcessorEngine::SetHotkeyDoubleSingleByteEnabled(BOOL v)
+{
+    BOOL enabled = v ? TRUE : FALSE;
+    if (_hotkeyDoubleSingleByteEnabled != enabled)
+    {
+        _hotkeyDoubleSingleByteEnabled = enabled;
+        if (_pThreadMgr && _tfClientId != TF_CLIENTID_NULL)
+        {
+            if (_hotkeyDoubleSingleByteEnabled)
+            {
+                InitPreservedKey(&_PreservedKey_DoubleSingleByte, _pThreadMgr, _tfClientId);
+            }
+            else
+            {
+                _PreservedKey_DoubleSingleByte.UninitPreservedKey(_pThreadMgr);
+            }
+        }
+    }
+
+    CRegKey reg;
+    if (reg.Create(HKEY_CURRENT_USER, L"Software\\DIME") == ERROR_SUCCESS)
+    {
+        reg.SetDWORDValue(L"HotkeyDoubleSingleByte", _hotkeyDoubleSingleByteEnabled ? 1 : 0);
+    }
+}
+
+void CCompositionProcessorEngine::SetWildcard(BOOL v)
+{
+    _isWildcard = v ? TRUE : FALSE;
+    CRegKey reg;
+    if (reg.Create(HKEY_CURRENT_USER, L"Software\\DIME") == ERROR_SUCCESS)
+    {
+        reg.SetDWORDValue(L"Wildcard", _isWildcard ? 1 : 0);
+    }
+}
+
+void CCompositionProcessorEngine::SetDisableWildcardAtFirst(BOOL v)
+{
+    _isDisableWildcardAtFirst = v ? TRUE : FALSE;
+    CRegKey reg;
+    if (reg.Create(HKEY_CURRENT_USER, L"Software\\DIME") == ERROR_SUCCESS)
+    {
+        reg.SetDWORDValue(L"DisableWildcardAtFirst", _isDisableWildcardAtFirst ? 1 : 0);
+    }
+}
+
+void CCompositionProcessorEngine::SetKeystrokeSort(BOOL v)
+{
+    _isKeystrokeSort = v ? TRUE : FALSE;
+    CRegKey reg;
+    if (reg.Create(HKEY_CURRENT_USER, L"Software\\DIME") == ERROR_SUCCESS)
+    {
+        reg.SetDWORDValue(L"KeystrokeSort", _isKeystrokeSort ? 1 : 0);
+    }
+}
+
 //+---------------------------------------------------------------------------
 //
 // SetupConfiguration
+
 //
 //----------------------------------------------------------------------------
 
 void CCompositionProcessorEngine::SetupConfiguration()
 {
+    // Candidate-engine options keep their original defaults for now.
+    // Wildcard / DisableWildcardAtFirst / KeystrokeSort are intentionally NOT
+    // read from the registry yet — revisit when the UI comes back.
     _isWildcard = TRUE;
     _isDisableWildcardAtFirst = TRUE;
-    _hasMakePhraseFromText = FALSE;
     _isKeystrokeSort = TRUE;
+
+    // Per-page candidate count and candidate font size are user-configurable.
+    CRegKey reg;
+    DWORD dwPages = 10;
+    DWORD dwFontSize = 0;
+    DWORD dwDigitEnPunct = 1;
+    if (reg.Open(HKEY_CURRENT_USER, L"Software\\DIME") == ERROR_SUCCESS)
+    {
+        if (reg.QueryDWORDValue(L"CandidatesPerPage", dwPages) == ERROR_SUCCESS &&
+            dwPages >= 1 && dwPages <= 10)
+        {
+            _candidatePageSize = (int)dwPages;
+        }
+        else
+        {
+            _candidatePageSize = 10;
+        }
+
+        // 0 = auto; otherwise one of the fixed sizes offered in the UI.
+        if (reg.QueryDWORDValue(L"CandidateFontSize", dwFontSize) == ERROR_SUCCESS &&
+            (dwFontSize == 0 || dwFontSize == 12 || dwFontSize == 14 ||
+             dwFontSize == 16 || dwFontSize == 18 || dwFontSize == 20 ||
+             dwFontSize == 24 || dwFontSize == 28 || dwFontSize == 32))
+        {
+            _candidateFontSize = (int)dwFontSize;
+        }
+        else
+        {
+            _candidateFontSize = 0;
+        }
+
+        // Default ON: after a digit, ',' / '.' stay English.
+        if (reg.QueryDWORDValue(L"EnglishCommaPeriodAfterDigit", dwDigitEnPunct) == ERROR_SUCCESS)
+        {
+            _englishCommaPeriodAfterDigit = (dwDigitEnPunct != 0) ? TRUE : FALSE;
+        }
+        else
+        {
+            _englishCommaPeriodAfterDigit = TRUE;
+        }
+
+        // Default ON: 常用字模式下空码时检索全码表.
+        DWORD dwEmptyFull = 1;
+        if (reg.QueryDWORDValue(L"EmptyCodeSearchFull", dwEmptyFull) == ERROR_SUCCESS)
+        {
+            _emptyCodeSearchFull = (dwEmptyFull != 0) ? TRUE : FALSE;
+        }
+        else
+        {
+            _emptyCodeSearchFull = TRUE;
+        }
+    }
+    else
+    {
+        _candidatePageSize = 10;
+        _candidateFontSize = 0;
+        _englishCommaPeriodAfterDigit = TRUE;
+        _emptyCodeSearchFull = TRUE;
+    }
+
+    _hasMakePhraseFromText = FALSE;
     _candidateWndWidth = CAND_WINDOW_WIDTH_PX;
 
-    SetInitialCandidateListRange();
+    SetInitialCandidateListRange(_candidatePageSize);
 
     SetDefaultCandidateTextFont();
 
@@ -1616,6 +1931,7 @@ BOOL CCompositionProcessorEngine::_TryLoadBinary(_In_ LPCWSTR pwszBinPath, _In_ 
         return FALSE;
     }
     pEngine->SetOnlyCommon(_GetCompartmentOnlyCommon());
+    pEngine->SetEmptyCodeSearchFull(_emptyCodeSearchFull);
 
     *ppFile = pFile;       // may be nullptr when only .bin ships
     *ppEngine = pEngine;   // owns pBin -> pBinFile
@@ -2284,25 +2600,60 @@ void CCompositionProcessorEngine::HideAllLanguageBarIcons()
     SetLanguageBarStatus(TF_LBI_STATUS_HIDDEN, TRUE);
 }
 
-void CCompositionProcessorEngine::SetInitialCandidateListRange()
+void CCompositionProcessorEngine::SetInitialCandidateListRange(int pageSize)
 {
-    for (DWORD i = 1; i <= 10; i++)
+    if (pageSize < 1) pageSize = 1;
+    if (pageSize > 10) pageSize = 10;
+
+    _candidateListIndexRange.Clear();
+    for (int i = 1; i <= pageSize; i++)
     {
         DWORD* pNewIndexRange = nullptr;
 
         pNewIndexRange = _candidateListIndexRange.Append();
         if (pNewIndexRange != nullptr)
         {
-            if (i != 10)
-            {
-                *pNewIndexRange = i;
-            }
-            else
-            {
-                *pNewIndexRange = 0;
-            }
+            // The 10th selectable slot maps to the digit '0' (value 0);
+            // slots 1-9 map to their own digit value.
+            *pNewIndexRange = (i == 10) ? 0 : (DWORD)i;
         }
     }
+}
+
+void CCompositionProcessorEngine::SetCandidatePageSize(int n)
+{
+    if (n < 1) n = 1;
+    if (n > 10) n = 10;
+
+    _candidatePageSize = n;
+    SetInitialCandidateListRange(n);
+
+    CRegKey reg;
+    if (reg.Create(HKEY_CURRENT_USER, L"Software\\DIME") == ERROR_SUCCESS)
+    {
+        reg.SetDWORDValue(L"CandidatesPerPage", (DWORD)n);
+    }
+}
+
+void CCompositionProcessorEngine::SetCandidateFontSize(int px)
+{
+    // 0 = auto; otherwise only the fixed sizes offered in the UI.
+    if (px != 0 && px != 12 && px != 14 && px != 16 && px != 18 &&
+        px != 20 && px != 24 && px != 28 && px != 32)
+    {
+        px = 0;
+    }
+
+    _candidateFontSize = px;
+
+    CRegKey reg;
+    if (reg.Create(HKEY_CURRENT_USER, L"Software\\DIME") == ERROR_SUCCESS)
+    {
+        reg.SetDWORDValue(L"CandidateFontSize", (DWORD)px);
+    }
+
+    // Rebuild the shared candidate font so the new size takes effect immediately.
+    SetDefaultCandidateTextFont();
 }
 
 // Pick a preferred candidate/font pixel height from a fixed set of
@@ -2318,21 +2669,98 @@ static int DimeSelectFontPixelHeight(UINT dpi)
     return 32;                   // 250% and above
 }
 
+int CCompositionProcessorEngine::GetAutoCandidateFontSize()
+{
+    HDC hdc = GetDC(NULL);
+    UINT dpi = hdc ? GetDeviceCaps(hdc, LOGPIXELSY) : 96;
+    if (hdc)
+    {
+        ReleaseDC(NULL, hdc);
+    }
+    if (dpi == 0)
+    {
+        dpi = 96;
+    }
+    return DimeSelectFontPixelHeight(dpi);
+}
+
+void CCompositionProcessorEngine::GetPreviewCandidateList(_In_z_ LPCWSTR key, _Inout_ CDIMEArray<CCandidateListItem> *pList, UINT maxCount)
+{
+    if (pList == nullptr || key == nullptr || key[0] == L'\0')
+    {
+        return;
+    }
+    if (!IsDictionaryAvailable() || _pTableDictionaryEngine == nullptr)
+    {
+        return;
+    }
+
+    CStringRange keyRange;
+    keyRange.Set(key, wcslen(key));
+
+    BOOL hasMore = FALSE;
+    _pTableDictionaryEngine->CollectWordByPrefix(&keyRange, pList, maxCount, &hasMore);
+
+    if (IsKeystrokeSort())
+    {
+        _pTableDictionaryEngine->SortListItemByFindKeyCode(pList);
+    }
+
+    // Trim the typed prefix from each FindKeyCode, matching GetCandidateList.
+    const DWORD_PTR keyLen = keyRange.GetLength();
+    for (UINT index = 0; index < pList->Count(); index++)
+    {
+        CCandidateListItem *pLI = pList->GetAt(index);
+        if (pLI->_FindKeyCode.GetLength() > keyLen)
+        {
+            CStringRange newFindKeyCode;
+            newFindKeyCode.Set(pLI->_FindKeyCode.Get() + keyLen, pLI->_FindKeyCode.GetLength() - keyLen);
+            pLI->_FindKeyCode.Set(newFindKeyCode);
+        }
+        else
+        {
+            CStringRange emptyKey;
+            emptyKey.Set(L"", 0);
+            pLI->_FindKeyCode.Set(emptyKey);
+        }
+    }
+}
+
 void CCompositionProcessorEngine::SetDefaultCandidateTextFont()
 {
-    // Candidate Text Font
-    if (Global::defaultlFontHandle == nullptr)
+    HDC hdc = GetDC(NULL);
+    UINT dpi = hdc ? GetDeviceCaps(hdc, LOGPIXELSY) : 96;
+    if (hdc)
     {
-        UINT dpi = GetDeviceCaps(GetDC(NULL), LOGPIXELSY);
-		WCHAR fontName[50] = {'\0'}; 
-		LoadString(Global::dllInstanceHandle, IDS_DEFAULT_FONT, fontName, 50);
-        Global::defaultlFontHandle = CreateFont(-DimeSelectFontPixelHeight(dpi), 0, 0, 0, FW_MEDIUM, 0, 0, 0, 0, 0, 0, 0, 0, fontName);
-        if (!Global::defaultlFontHandle)
+        ReleaseDC(NULL, hdc);
+    }
+    if (dpi == 0)
+    {
+        dpi = 96;
+    }
+
+    // Manual size wins; 0 falls back to the DPI-tier auto height.
+    int fontPx = (_candidateFontSize > 0) ? _candidateFontSize : DimeSelectFontPixelHeight(dpi);
+
+    WCHAR fontName[50] = {L'\0'};
+    LoadString(Global::dllInstanceHandle, IDS_DEFAULT_FONT, fontName, 50);
+
+    HFONT hNew = CreateFont(-fontPx, 0, 0, 0, FW_MEDIUM, 0, 0, 0, 0, 0, 0, 0, 0, fontName);
+    if (!hNew)
+    {
+        LOGFONT lf = {0};
+        SystemParametersInfo(SPI_GETICONTITLELOGFONT, sizeof(LOGFONT), &lf, 0);
+        // Fall back to the default GUI face on failure.
+        hNew = CreateFont(-fontPx, 0, 0, 0, FW_MEDIUM, 0, 0, 0, 0, 0, 0, 0, 0, lf.lfFaceName);
+    }
+
+    if (hNew)
+    {
+        HFONT hOld = Global::defaultlFontHandle;
+        Global::defaultlFontHandle = hNew;
+        if (hOld != nullptr)
         {
-			LOGFONT lf;
-			SystemParametersInfo(SPI_GETICONTITLELOGFONT, sizeof(LOGFONT), &lf, 0);
-            // Fall back to the default GUI font on failure.
-            Global::defaultlFontHandle = CreateFont(-DimeSelectFontPixelHeight(dpi), 0, 0, 0, FW_MEDIUM, 0, 0, 0, 0, 0, 0, 0, 0, lf.lfFaceName);
+            DeleteObject(hOld);
         }
     }
 }
@@ -2376,7 +2804,7 @@ static BOOL _TryAssignCandidatePageKeyForMode(UINT uCode, WCHAR wch, BOOL fCompo
         return FALSE;
     }
 
-    if (uCode == VK_OEM_MINUS || wch == L'-')
+    if (uCode == VK_OEM_MINUS)
     {
         if (pKeyState)
         {
@@ -2424,9 +2852,12 @@ BOOL CCompositionProcessorEngine::IsVirtualKeyNeed(UINT uCode, _In_reads_(1) WCH
 
     //
     // Enter temporary English mode with ';' on an empty buffer.
+    // Shift+; produces ':' and must NOT enter English mode: let it fall through
+    // to punctuation / full-half-width handling so the colon is committed directly.
     //
     if (!_isEnglishInput && _keystrokeBuffer.GetLength() == 0 &&
-        uCode == VK_OEM_1 && (fComposing || candidateMode == CANDIDATE_NONE))
+        uCode == VK_OEM_1 && pwch && *pwch == L';' &&
+        (fComposing || candidateMode == CANDIDATE_NONE))
     {
         if (pKeyState)
         {
