@@ -1276,8 +1276,15 @@ void CCompositionProcessorEngine::SetEnglishCommaPeriodAfterDigit(BOOL v)
     }
 }
 
-void CCompositionProcessorEngine::UpdateLastKeyWasDigit(UINT uCode, WCHAR wch)
+void CCompositionProcessorEngine::UpdateLastKeyWasDigit(UINT uCode, WCHAR wch, BOOL isCandidateSelect)
 {
+    // 选字数字上屏的是汉字, 后续 ,/. 应走中文标点.
+    if (isCandidateSelect)
+    {
+        _lastKeyWasDigit = FALSE;
+        return;
+    }
+
     if ((uCode >= L'0' && uCode <= L'9') ||
         (uCode >= VK_NUMPAD0 && uCode <= VK_NUMPAD9) ||
         (wch >= L'0' && wch <= L'9') ||

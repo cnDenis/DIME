@@ -1,4 +1,4 @@
-; DIME 迪铭五笔输入法 — Inno Setup 6 安装脚本
+; DIME 迪弥五笔输入法 — Inno Setup 6 安装脚本
 ;
 ; 先运行 scripts\package.bat 组装 out\dist\DIME\（x64/x86 DLL + dict\），
 ; 再用本脚本编译出 out\dist\DIME-Setup.exe。也可单独用 ISCC 编译本文件。
@@ -14,7 +14,7 @@
 ;   * 再次运行安装包且已安装时, 可选择升级或卸载。
 
 #define MyAppId        "DIME-IME"
-#define MyAppName      "DIME 迪铭五笔输入法"
+#define MyAppName      "DIME 迪弥五笔输入法"
 ; Version is supplied by package.bat / CI as ISCC /DMyAppVersion=...
 ; (v* tag if present, else Version.h + date). Fallback for a bare ISCC run.
 #ifndef MyAppVersion

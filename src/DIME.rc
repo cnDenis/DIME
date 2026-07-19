@@ -47,12 +47,12 @@ BEGIN
         BLOCK "040904b0"
         BEGIN
             VALUE "CompanyName", "MSFT"
-            VALUE "FileDescription", "Diming Wubi IME"
+            VALUE "FileDescription", "DIME Wubi IME"
             VALUE "FileVersion", DIME_VERSION_STRING
             VALUE "InternalName", "dime.dll"
             VALUE "LegalCopyright", "Copyright (C)"
             VALUE "OriginalFilename", "dime.dll"
-            VALUE "ProductName", "Diming Wubi"
+            VALUE "ProductName", "DIME Wubi"
             VALUE "ProductVersion", DIME_VERSION_STRING
         END
     END
@@ -95,7 +95,7 @@ END
 
 STRINGTABLE
 BEGIN
-    IDIS_DIME          "Diming Wubi"
+    IDIS_DIME          "DIME Wubi"
     IDS_DEFAULT_FONT        "Microsoft YaHei UI"
 END
 
@@ -117,7 +117,7 @@ LANGUAGE LANG_CHINESE, SUBLANG_CHINESE_SIMPLIFIED
 
 STRINGTABLE
 BEGIN
-    IDIS_DIME          "迪铭五笔"
+    IDIS_DIME          "迪弥五笔"
 END
 
 #endif    // Chinese (Simplified) resources

@@ -338,9 +338,11 @@ STDAPI CDIME::OnKeyDown(ITfContext *pContext, WPARAM wParam, LPARAM lParam, BOOL
 
     // Eaten keys reach OnKeyDown; update digit-follow state after the eat check
     // so ',' / '.' still see the previous key's digit flag.
+    // 选字数字键最终上屏的是汉字, 不能当作数字输入, 否则随后 ,/. 会误走英文标点.
     if (_pCompositionProcessorEngine)
     {
-        _pCompositionProcessorEngine->UpdateLastKeyWasDigit(code, wch);
+        BOOL isCandidateSelect = (*pIsEaten && KeystrokeState.Function == FUNCTION_SELECT_BY_NUMBER);
+        _pCompositionProcessorEngine->UpdateLastKeyWasDigit(code, wch, isCandidateSelect);
     }
 
     if (*pIsEaten)

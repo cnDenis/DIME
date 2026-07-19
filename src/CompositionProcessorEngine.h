@@ -129,7 +129,8 @@ public:
     BOOL IsEnglishCommaPeriodAfterDigit() const { return _englishCommaPeriodAfterDigit; }
     void SetEnglishCommaPeriodAfterDigit(BOOL v);
     // Update / query follow-digit state from the key event sink.
-    void UpdateLastKeyWasDigit(UINT uCode, WCHAR wch);
+    // isCandidateSelect: digit used to pick a candidate (上屏汉字), not a digit input.
+    void UpdateLastKeyWasDigit(UINT uCode, WCHAR wch, BOOL isCandidateSelect = FALSE);
     BOOL ShouldOutputEnglishCommaOrPeriod(WCHAR wch) const;
 
     // Hotkey enable/disable (settings dialog "快捷键").

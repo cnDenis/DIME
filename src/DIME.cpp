@@ -718,7 +718,7 @@ HRESULT CDIME::GetDisplayName(_Out_ BSTR *pbstrDisplayName)
         return E_INVALIDARG;
     }
 
-    *pbstrDisplayName = SysAllocString(L"DIME 设置");
+    *pbstrDisplayName = SysAllocString(L"迪弥五笔设置");
     return (*pbstrDisplayName != nullptr) ? S_OK : E_OUTOFMEMORY;
 }
 

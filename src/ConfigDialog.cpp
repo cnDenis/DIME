@@ -898,7 +898,7 @@ static void _CreateControls(_In_ HWND hWnd, _In_ DlgState* pState)
     // concatenated into the format string.
     WCHAR aboutText[512] = {0};
     StringCchPrintf(aboutText, ARRAYSIZE(aboutText),
-        L"迪铭五笔 (DIME)\r\n"
+        L"迪弥五笔 (DIME)\r\n"
         L"版本 %s\r\n"
         L"Windows TSF 五笔输入法\r\n"
         L"\r\n"
@@ -1098,7 +1098,7 @@ void DimeShowConfigDialog(_In_ HWND hwndOwner, _In_ CDIME* pTextService)
     pState->pTextService = pTextService;
     pState->hwndOwner = hwndOwner;
 
-    HWND hWnd = CreateWindowEx(WS_EX_TOPMOST, L"DimeConfigDialog", L"DIME 设置",
+    HWND hWnd = CreateWindowEx(WS_EX_TOPMOST, L"DimeConfigDialog", L"迪弥五笔设置",
         WS_OVERLAPPEDWINDOW & ~(WS_MAXIMIZEBOX | WS_MINIMIZEBOX | WS_THICKFRAME),
         CW_USEDEFAULT, CW_USEDEFAULT, 560, 480,
         nullptr, nullptr, Global::dllInstanceHandle, pState);

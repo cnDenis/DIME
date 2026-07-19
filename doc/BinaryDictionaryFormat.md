@@ -1,7 +1,7 @@
 # DIME 预编译二进制词库格式（DIME Binary Dictionary, `.bin`）
 
 > 状态：设计文档（对应二进制格式 version = 2）
-> 适用范围：DIME（迪铭五笔输入法）五笔主词库与拼音词库
+> 适用范围：DIME（迪弥五笔输入法）五笔主词库与拼音词库
 > 关联代码：`BinaryDictFormat.h`（运行时与构建工具共用）、`BinaryDictionaryEngine.*`（运行时读取器）、`build_bindict.cpp`（离线构建工具）、`TableDictionaryEngine.*`、`FileMapping.*`、`CompositionProcessorEngine.*`（加载与探测）
 
 ---
