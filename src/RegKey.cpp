@@ -240,6 +240,29 @@ LONG CRegKey::SetDWORDValue(_In_opt_ LPCWSTR pwszValueName, DWORD dwValue)
     return RegSetValueEx(_keyHandle, pwszValueName, NULL, REG_DWORD, (LPBYTE)(&dwValue), sizeof(DWORD));
 }
 
+LONG CRegKey::QueryQWORDValue(_In_opt_ LPCWSTR pwszValueName, _Out_ ULONGLONG &qwValue)
+{
+    LONG res = 0;
+    DWORD dataType = REG_NONE;
+    ULONG cb = sizeof(ULONGLONG);
+    qwValue = 0;
+    res = RegQueryValueEx(_keyHandle, pwszValueName, NULL, &dataType, (LPBYTE)(&qwValue), &cb);
+    if (res != ERROR_SUCCESS)
+    {
+        return res;
+    }
+    if (dataType != REG_QWORD || cb != sizeof(ULONGLONG))
+    {
+        return ERROR_INVALID_DATA;
+    }
+    return ERROR_SUCCESS;
+}
+
+LONG CRegKey::SetQWORDValue(_In_opt_ LPCWSTR pwszValueName, ULONGLONG qwValue)
+{
+    return RegSetValueEx(_keyHandle, pwszValueName, NULL, REG_QWORD, (LPBYTE)(&qwValue), sizeof(ULONGLONG));
+}
+
 //---------------------------------------------------------------------
 //
 // QueryBinaryValue

@@ -14,3 +14,6 @@ class CDIME;
 // pTextService may be an activated live instance (status bar / candidate) or an
 // unactivated CoCreate from ITfFnConfigure (Windows language settings Options).
 void DimeShowConfigDialog(HWND hwndOwner, CDIME* pTextService);
+
+// Exported entry for dime_config.exe: create an unactivated CDIME and show settings.
+extern "C" HRESULT WINAPI DimeLaunchConfigDialog(HWND hwndParent);

@@ -173,3 +173,30 @@ target_compile_definitions(build_bindict PRIVATE
 if(MSVC)
     target_compile_options(build_bindict PRIVATE /utf-8)
 endif()
+
+# ---------------------------------------------------------------------------
+# Settings launcher: loads sibling dime64/32.dll and opens the config dialog.
+# Shipped next to the DLLs in the install directory as dime_config.exe.
+# ---------------------------------------------------------------------------
+add_executable(dime_config WIN32
+    "src/dime_config.cpp"
+    "src/dime_config.rc"
+)
+
+target_compile_definitions(dime_config PRIVATE
+    WIN32
+    _WINDOWS
+    UNICODE
+    _UNICODE
+)
+
+if(MSVC)
+    target_compile_options(dime_config PRIVATE /utf-8)
+    # Keep the linker-generated CRT SxS manifest; only mark DPI awareness.
+    # (Embedding a bare RT_MANIFEST with /MANIFEST:NO caused side-by-side errors.)
+    set_property(TARGET dime_config PROPERTY VS_DPI_AWARE "PerMonitor")
+endif()
+
+target_link_libraries(dime_config PRIVATE
+    ole32
+)

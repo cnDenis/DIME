@@ -36,6 +36,9 @@ public:
     LONG QueryDWORDValue(_In_opt_ LPCWSTR pwszValueName, _Out_ DWORD &dwValue);
     LONG SetDWORDValue(_In_opt_ LPCWSTR pwszValueName, DWORD dwValue);
 
+    LONG QueryQWORDValue(_In_opt_ LPCWSTR pwszValueName, _Out_ ULONGLONG &qwValue);
+    LONG SetQWORDValue(_In_opt_ LPCWSTR pwszValueName, ULONGLONG qwValue);
+
     LONG QueryBinaryValue(_In_opt_ LPCWSTR pwszValueName, _Out_writes_opt_(cbData) BYTE* lpData, DWORD cbData);
     LONG SetBinaryValue(_In_opt_ LPCWSTR pwszValueName, _In_reads_(cbData) BYTE* lpData, DWORD cbData);
 

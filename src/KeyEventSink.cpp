@@ -107,8 +107,9 @@ BOOL CDIME::_IsKeyEaten(_In_ ITfContext *pContext, UINT codeIn, _Out_ UINT *pCod
         }
     }
 
-    // if the keyboard is closed, we don't eat keys, with the exception of the touch keyboard specials keys
-    if (!isOpen && !isDoubleSingleByte && !isPunctuation)
+    // 英文态 (IME 关闭): 一律放行, 只输出半角英文/半角英文标点;
+    // 不应用全角或中文标点 (即使 compartment 仍为开).
+    if (!isOpen)
     {
         return isTouchKeyboardSpecialKeys;
     }

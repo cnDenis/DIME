@@ -77,7 +77,67 @@ void ParseConfig(const uint8_t* base, uint32_t configOffset, uint32_t configSize
     flush(line);   // trailing line without a terminator
 }
 
+BOOL ReadConfigFromFileImpl(_In_z_ LPCWSTR binPath, _Out_ DictConfig& out)
+{
+    out = DictConfig();
+    if (!binPath || binPath[0] == L'\0')
+    {
+        return FALSE;
+    }
+
+    HANDLE hFile = CreateFileW(binPath, GENERIC_READ, FILE_SHARE_READ, nullptr,
+                               OPEN_EXISTING, FILE_ATTRIBUTE_NORMAL, nullptr);
+    if (hFile == INVALID_HANDLE_VALUE)
+    {
+        return FALSE;
+    }
+
+    LARGE_INTEGER fileSize = {};
+    if (!GetFileSizeEx(hFile, &fileSize) || fileSize.QuadPart < (LONGLONG)DimeBinDict::kHeaderSize)
+    {
+        CloseHandle(hFile);
+        return FALSE;
+    }
+
+    HANDLE hMap = CreateFileMappingW(hFile, nullptr, PAGE_READONLY, 0, 0, nullptr);
+    if (!hMap)
+    {
+        CloseHandle(hFile);
+        return FALSE;
+    }
+
+    const BYTE* base = static_cast<const BYTE*>(MapViewOfFile(hMap, FILE_MAP_READ, 0, 0, 0));
+    if (!base)
+    {
+        CloseHandle(hMap);
+        CloseHandle(hFile);
+        return FALSE;
+    }
+
+    BOOL ok = FALSE;
+    const DimeBinDict::Header* pHdr = reinterpret_cast<const DimeBinDict::Header*>(base);
+    if (DimeBinDict::ValidateHeader(pHdr, static_cast<uint64_t>(fileSize.QuadPart)))
+    {
+        uint32_t configSize = pHdr->codeEntryOffset - DimeBinDict::kHeaderSize;
+        if (configSize > 0)
+        {
+            ParseConfig(base, DimeBinDict::kHeaderSize, configSize, out);
+        }
+        ok = TRUE;
+    }
+
+    UnmapViewOfFile(base);
+    CloseHandle(hMap);
+    CloseHandle(hFile);
+    return ok;
+}
+
 } // namespace
+
+BOOL CBinaryDictionaryEngine::ReadConfigFromFile(_In_z_ LPCWSTR binPath, _Out_ DictConfig& out)
+{
+    return ReadConfigFromFileImpl(binPath, out);
+}
 
 //+---------------------------------------------------------------------------
 //

@@ -46,6 +46,10 @@ public:
     const DictConfig& GetConfig() const { return _config; }
     const std::wstring& GetName() const { return _config.name; }
 
+    // Lightweight: map a .bin just long enough to read its config (NAME etc.).
+    // Returns FALSE if the file is missing or the header is invalid.
+    static BOOL ReadConfigFromFile(_In_z_ LPCWSTR binPath, _Out_ DictConfig& out);
+
     // "Only common characters" filter: when enabled, single characters outside
     // GB2312 (rare) are hidden; phrases (length > 1) are always shown.
     void SetOnlyCommon(BOOL f) { _onlyCommon = f; }

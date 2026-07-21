@@ -103,6 +103,29 @@ public:
     BOOL IsDictionaryAvailable() { return (_pTableDictionaryEngine ? TRUE : FALSE); }
     BOOL IsPinyinDictionaryAvailable() { return (_pPinyinDictionaryEngine ? TRUE : FALSE); }
 
+    // 主词库选择 (注册表 Software\DIME\Dictionary, 默认 wubi98; 不含扩展名).
+    void GetMainDictionaryName(_Out_writes_(cch) WCHAR* buf, DWORD cch) const;
+    BOOL SetMainDictionaryName(_In_z_ LPCWSTR name);
+    static void ReadDictionaryNameFromRegistry(_Out_writes_(cch) WCHAR* buf, DWORD cch);
+    static void WriteDictionaryNameToRegistry(_In_z_ LPCWSTR name);
+    static BOOL ResolveDictionaryDirectory(_Out_writes_(cch) WCHAR* buf, DWORD cch);
+    // 扫描 dict 下 *.bin (排除 pinyin.bin); stem 为文件名, displayName 为 NAME 属性.
+    struct DictionaryListItem
+    {
+        WCHAR stem[64];
+        WCHAR displayName[128];
+    };
+    static int EnumerateMainDictionaries(_Out_writes_(maxCount) DictionaryListItem* items, int maxCount);
+
+    // 跨进程设置同步: 注册表 SettingsVersion (FILETIME QWORD) + 获焦时对比.
+    // SyncSettingsOnFocus (DWORD, 默认 1): 关闭则获焦时不重载.
+    static BOOL IsSyncSettingsOnFocusEnabled();
+    static void SetSyncSettingsOnFocusEnabled(BOOL enabled);
+    static ULONGLONG ReadSettingsVersionFromRegistry();
+    static ULONGLONG BumpSettingsVersionInRegistry();
+    void AcknowledgeSettingsVersion();
+    void ApplySettingsFromRegistryIfNeeded();
+
     // Temporary pinyin mode: reverse-lookup the wubi code for a candidate word
     // so it can be displayed on the right side of each candidate.
     BOOL GetWubiCodeForWord(_In_ const CStringRange *pWord, _Inout_ CStringRange *pCode);
@@ -196,6 +219,9 @@ private:
     BOOL SetupDictionaryFile();
     CFile* GetDictionaryFile();
     BOOL _LoadDictionary(_In_ LPCWSTR pwszDicName, _In_ LPCWSTR pwszDir, size_t dirLen, _Out_ CFileMapping** ppFile, _Out_ CTableDictionaryEngine** ppEngine);
+    void _UnloadMainDictionary();
+    BOOL _LoadMainDictionaryFromStem(_In_z_ LPCWSTR stem, _In_ LPCWSTR pwszDir, size_t dirLen);
+    static BOOL _IsValidDictionaryStem(_In_z_ LPCWSTR name);
     static BOOL _ReplaceExtensionWithBin(_Inout_ WCHAR* pwszPath);
     BOOL _TryLoadBinary(_In_ LPCWSTR pwszBinPath, _In_ LPCWSTR pwszTxtPath, _Out_ CFileMapping** ppFile, _Out_ CTableDictionaryEngine** ppEngine);
     void _GetPinyinCandidateList(_Inout_ CDIMEArray<CCandidateListItem> *pCandidateList, BOOL loadAllCandidates);
@@ -218,6 +244,7 @@ private:
 
     CTableDictionaryEngine* _pTableDictionaryEngine;
     CTableDictionaryEngine* _pPinyinDictionaryEngine;
+    WCHAR _mainDictionaryName[64];
     CStringRange _keystrokeBuffer;
 
     BOOL _hasWildcardIncludedInKeystrokeBuffer;
@@ -291,6 +318,7 @@ private:
     UINT _candidateWndWidth;
     int  _candidatePageSize;   // candidates selectable per page (1-10)
     int  _candidateFontSize;   // 0 = auto (DPI tiers), else fixed px
+    ULONGLONG _settingsVersion; // 与注册表 SettingsVersion 对齐的本地副本
 
     BOOL _imeModeSnapshotValid;
     BOOL _imeModeSnapshotFullWidth;

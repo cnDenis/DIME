@@ -10,25 +10,23 @@ set "ROOT=%CD%"
 set "TEST_ROOT=%ROOT%\out\test"
 set "REGSVR64=%SystemRoot%\System32\regsvr32.exe"
 set "REGSVR32=%SystemRoot%\SysWOW64\regsvr32.exe"
-set "SRC_DIC=%ROOT%\Dictionary\wubi98.txt"
-
-set "SRC_DLL_X64="
-set "SRC_DLL_X86="
-
-REM Precompile binary dictionaries (.bin) from the text sources so the IME
-REM loads them with zero parsing. The runtime also compiles on the fly if a
-REM .bin is missing, using the converter shipped below into dict\.
+REM Precompile every Dictionary\*.txt into a sibling .bin (pinyin auto --max-code 24).
 set "BUILD_BIN=%ROOT%\out\x64\Debug\build_bindict.exe"
 if not exist "%ROOT%\out\x64\Debug\build_bindict.exe" if exist "%ROOT%\out\x64\Release\build_bindict.exe" set "BUILD_BIN=%ROOT%\out\x64\Release\build_bindict.exe"
 if exist "%BUILD_BIN%" (
     echo.
     echo Compile binary dictionaries .bin ...
-    "%BUILD_BIN%" "%SRC_DIC%" "%ROOT%\Dictionary\wubi98.bin"
-    "%BUILD_BIN%" "%ROOT%\Dictionary\pinyin.txt" "%ROOT%\Dictionary\pinyin.bin" --max-code 24
+    pushd "%ROOT%"
+    "%BUILD_BIN%"
+    set "BIND_RC=!errorlevel!"
+    popd
+    if not "!BIND_RC!"=="0" (
+        echo [ERROR] build_bindict failed, code !BIND_RC!
+        exit /b 1
+    )
 ) else (
     echo [WARN] build_bindict.exe not found; deploying text-only dictionaries.
 )
-
 
 if exist "%ROOT%\out\x64\Debug\dime.dll" set "SRC_DLL_X64=%ROOT%\out\x64\Debug\dime.dll"
 if exist "%ROOT%\out\x64\Release\dime.dll" if not defined SRC_DLL_X64 set "SRC_DLL_X64=%ROOT%\out\x64\Release\dime.dll"
@@ -52,8 +50,9 @@ if not defined SRC_DLL_X86 (
     exit /b 1
 )
 
-if not exist "%SRC_DIC%" (
-    echo [ERROR] Dictionary not found: %SRC_DIC%
+dir /b "%ROOT%\Dictionary\*.txt" >nul 2>&1
+if errorlevel 1 (
+    echo [ERROR] no .txt dictionaries found in "%ROOT%\Dictionary"
     exit /b 1
 )
 
@@ -89,17 +88,22 @@ copy /Y "%SRC_DLL_X64%" "%NEW_X64%\dime64.dll" >nul
 copy /Y "%SRC_DLL_X86%" "%NEW_X86%\dime32.dll" >nul
 
 REM Shared code table in dict\ (loaded by both x64 and x86 via the engine's
-REM <dllDir>\..\dict\ probe). .bin is used directly; .txt is kept so the runtime
-REM converter can rebuild the .bin if it is ever missing or corrupt.
-copy /Y "%SRC_DIC%" "%NEW_DICT%\wubi98.txt" >nul
-copy /Y "%ROOT%\Dictionary\pinyin.txt" "%NEW_DICT%\pinyin.txt" >nul
-if exist "%ROOT%\Dictionary\wubi98.bin" copy /Y "%ROOT%\Dictionary\wubi98.bin" "%NEW_DICT%\wubi98.bin" >nul
-if exist "%ROOT%\Dictionary\pinyin.bin" copy /Y "%ROOT%\Dictionary\pinyin.bin" "%NEW_DICT%\pinyin.bin" >nul
+REM <dllDir>\..\dict\ probe). Copy every Dictionary\*.txt and matching .bin.
+for %%F in ("%ROOT%\Dictionary\*.txt") do (
+    copy /Y "%%F" "%NEW_DICT%\%%~nxF" >nul
+    if exist "%%~dpnF.bin" copy /Y "%%~dpnF.bin" "%NEW_DICT%\%%~nF.bin" >nul
+)
 if exist "%BUILD_BIN%" copy /Y "%BUILD_BIN%" "%NEW_DICT%\build_bindict.exe" >nul
 
+REM Settings launcher next to x64 DLL (loads dime64.dll from the same folder).
+set "SRC_CFG="
+if exist "%ROOT%\out\x64\Debug\dime_config.exe" set "SRC_CFG=%ROOT%\out\x64\Debug\dime_config.exe"
+if exist "%ROOT%\out\x64\Release\dime_config.exe" if not defined SRC_CFG set "SRC_CFG=%ROOT%\out\x64\Release\dime_config.exe"
+if defined SRC_CFG copy /Y "%SRC_CFG%" "%NEW_X64%\dime_config.exe" >nul
+
 echo.
-echo x64 DLL : %SRC_DLL_X64% -> dime64.dll
-echo x86 DLL : %SRC_DLL_X86% -> dime32.dll
+echo x64 DLL : %SRC_DLL_X64% -^> dime64.dll
+echo x86 DLL : %SRC_DLL_X86% -^> dime32.dll
 echo Dict    : %NEW_DICT%
 echo Deploy  : %NEW_DIR%
 

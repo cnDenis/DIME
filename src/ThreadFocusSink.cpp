@@ -7,6 +7,7 @@
 #include "Private.h"
 #include "DIME.h"
 #include "CandidateListUIPresenter.h"
+#include "CompositionProcessorEngine.h"
 
 //+---------------------------------------------------------------------------
 //
@@ -33,6 +34,10 @@ STDAPI CDIME::OnSetThreadFocus()
     }
 
     _isThreadFocused = TRUE;
+    if (_pCompositionProcessorEngine)
+    {
+        _pCompositionProcessorEngine->ApplySettingsFromRegistryIfNeeded();
+    }
     if (_pStatusWindow)
     {
         _RefreshStatusWindow();

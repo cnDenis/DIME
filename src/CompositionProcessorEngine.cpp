@@ -16,6 +16,7 @@
 #include "LanguageBar.h"
 #include "DebugLog.h"
 #include "RegKey.h"
+#include "StatusWindow.h"
 
 
 //////////////////////////////////////////////////////////////////////
@@ -106,6 +107,8 @@ CCompositionProcessorEngine::CCompositionProcessorEngine()
     _pPinyinDictionaryEngine = nullptr;
     _pDictionaryFile = nullptr;
     _pPinyinDictionaryFile = nullptr;
+    _mainDictionaryName[0] = L'\0';
+    StringCchCopy(_mainDictionaryName, ARRAYSIZE(_mainDictionaryName), TEXTSERVICE_DIC_STEM);
     _isPinyinInput = FALSE;
     _isEnglishInput = FALSE;
     _isOnlyCommon = FALSE;
@@ -148,6 +151,7 @@ CCompositionProcessorEngine::CCompositionProcessorEngine()
     _candidateWndWidth = CAND_WINDOW_WIDTH_PX;
     _candidatePageSize = 10;
     _candidateFontSize = 0;
+    _settingsVersion = 0;
 
     _imeModeSnapshotValid = FALSE;
     _imeModeSnapshotFullWidth = FALSE;
@@ -291,6 +295,7 @@ BOOL CCompositionProcessorEngine::SetupLanguageProfile(LANGID langid, REFGUID gu
     SetupKeystroke();
     SetupConfiguration();
     SetupDictionaryFile();
+    AcknowledgeSettingsVersion();
 
 Exit:
     return ret;
@@ -1102,7 +1107,12 @@ void CCompositionProcessorEngine::OnPreservedKey(REFGUID rguid, _Out_ BOOL *pIsE
     }
     else if (IsEqualGUID(rguid, _PreservedKey_DoubleSingleByte.Guid))
     {
-        if (!_hotkeyDoubleSingleByteEnabled ||
+        // 英文态 (IME 关闭) 不响应全/半角热键, 只输出半角.
+        BOOL isOpen = FALSE;
+        CCompartment CompartmentKeyboardOpen(pThreadMgr, tfClientId, GUID_COMPARTMENT_KEYBOARD_OPENCLOSE);
+        CompartmentKeyboardOpen._GetCompartmentBOOL(isOpen);
+        if (!isOpen ||
+            !_hotkeyDoubleSingleByteEnabled ||
             !CheckShiftKeyOnly(&_PreservedKey_DoubleSingleByte.TSFPreservedKeyTable))
         {
             *pIsEaten = FALSE;
@@ -1113,7 +1123,12 @@ void CCompositionProcessorEngine::OnPreservedKey(REFGUID rguid, _Out_ BOOL *pIsE
     }
     else if (IsEqualGUID(rguid, _PreservedKey_Punctuation.Guid))
     {
-        if (!_hotkeyPunctuationEnabled ||
+        // 英文态不响应中英文标点热键.
+        BOOL isOpen = FALSE;
+        CCompartment CompartmentKeyboardOpen(pThreadMgr, tfClientId, GUID_COMPARTMENT_KEYBOARD_OPENCLOSE);
+        CompartmentKeyboardOpen._GetCompartmentBOOL(isOpen);
+        if (!isOpen ||
+            !_hotkeyPunctuationEnabled ||
             !CheckShiftKeyOnly(&_PreservedKey_Punctuation.TSFPreservedKeyTable))
         {
             *pIsEaten = FALSE;
@@ -1124,7 +1139,11 @@ void CCompositionProcessorEngine::OnPreservedKey(REFGUID rguid, _Out_ BOOL *pIsE
     }
     else if (IsEqualGUID(rguid, _PreservedKey_OnlyCommon.Guid))
     {
-        if (!_hotkeyOnlyCommonEnabled)
+        // 英文态不响应常/全热键.
+        BOOL isOpen = FALSE;
+        CCompartment CompartmentKeyboardOpen(pThreadMgr, tfClientId, GUID_COMPARTMENT_KEYBOARD_OPENCLOSE);
+        CompartmentKeyboardOpen._GetCompartmentBOOL(isOpen);
+        if (!isOpen || !_hotkeyOnlyCommonEnabled)
         {
             *pIsEaten = FALSE;
             return;
@@ -1149,24 +1168,52 @@ void CCompositionProcessorEngine::OnPreservedKey(REFGUID rguid, _Out_ BOOL *pIsE
 
 void CCompositionProcessorEngine::ToggleDoubleSingleByte(_In_ ITfThreadMgr *pThreadMgr, TfClientId tfClientId)
 {
+    // 英文态固定半角, 不允许切换.
+    BOOL isOpen = FALSE;
+    CCompartment CompartmentKeyboardOpen(pThreadMgr, tfClientId, GUID_COMPARTMENT_KEYBOARD_OPENCLOSE);
+    if (FAILED(CompartmentKeyboardOpen._GetCompartmentBOOL(isOpen)) || !isOpen)
+    {
+        return;
+    }
+
     BOOL isDouble = FALSE;
     CCompartment CompartmentDoubleSingleByte(pThreadMgr, tfClientId, Global::DIMEGuidCompartmentDoubleSingleByte);
     CompartmentDoubleSingleByte._GetCompartmentBOOL(isDouble);
     CompartmentDoubleSingleByte._SetCompartmentBOOL(isDouble ? FALSE : TRUE);
     NotifyInputModeChanged(pThreadMgr);
+    ULONGLONG ver = BumpSettingsVersionInRegistry();
+    _settingsVersion = ver;
 }
 
 void CCompositionProcessorEngine::TogglePunctuation(_In_ ITfThreadMgr *pThreadMgr, TfClientId tfClientId)
 {
+    // 英文态固定半角英文标点, 不允许切换.
+    BOOL isOpen = FALSE;
+    CCompartment CompartmentKeyboardOpen(pThreadMgr, tfClientId, GUID_COMPARTMENT_KEYBOARD_OPENCLOSE);
+    if (FAILED(CompartmentKeyboardOpen._GetCompartmentBOOL(isOpen)) || !isOpen)
+    {
+        return;
+    }
+
     BOOL isPunctuation = FALSE;
     CCompartment CompartmentPunctuation(pThreadMgr, tfClientId, Global::DIMEGuidCompartmentPunctuation);
     CompartmentPunctuation._GetCompartmentBOOL(isPunctuation);
     CompartmentPunctuation._SetCompartmentBOOL(isPunctuation ? FALSE : TRUE);
     NotifyInputModeChanged(pThreadMgr);
+    ULONGLONG ver = BumpSettingsVersionInRegistry();
+    _settingsVersion = ver;
 }
 
 void CCompositionProcessorEngine::ToggleOnlyCommon(_In_ ITfThreadMgr *pThreadMgr, TfClientId tfClientId)
 {
+    // 英文态不切换常/全.
+    BOOL isOpen = FALSE;
+    CCompartment CompartmentKeyboardOpen(pThreadMgr, tfClientId, GUID_COMPARTMENT_KEYBOARD_OPENCLOSE);
+    if (FAILED(CompartmentKeyboardOpen._GetCompartmentBOOL(isOpen)) || !isOpen)
+    {
+        return;
+    }
+
     // Flip the "only common characters" state in its TSF compartment. The
     // compartment is the single source of truth (TSF-persisted, instance-
     // independent), so the filter and the candidate-window indicator stay
@@ -1199,6 +1246,8 @@ void CCompositionProcessorEngine::ToggleOnlyCommon(_In_ ITfThreadMgr *pThreadMgr
     }
 
     NotifyInputModeChanged(pThreadMgr);
+    ULONGLONG ver = BumpSettingsVersionInRegistry();
+    _settingsVersion = ver;
 }
 
 void CCompositionProcessorEngine::SetDoubleSingleByte(_In_ ITfThreadMgr *pThreadMgr, TfClientId tfClientId, BOOL isFullWidth)
@@ -1588,12 +1637,21 @@ BOOL CCompositionProcessorEngine::InitLanguageBar(_In_ CLangBarItemButton *pLang
 //
 //----------------------------------------------------------------------------
 
-BOOL CCompositionProcessorEngine::SetupDictionaryFile()
+BOOL CCompositionProcessorEngine::ResolveDictionaryDirectory(_Out_writes_(cch) WCHAR* buf, DWORD cch)
 {
-    WCHAR wszFileName[MAX_PATH] = {'\0'};
-    DWORD cchA = GetModuleFileName(Global::dllInstanceHandle, wszFileName, ARRAYSIZE(wszFileName));
+    if (!buf || cch == 0)
+    {
+        return FALSE;
+    }
+    buf[0] = L'\0';
 
-    // find the last separator to obtain the DLL directory
+    WCHAR wszFileName[MAX_PATH] = {L'\0'};
+    DWORD cchA = GetModuleFileName(Global::dllInstanceHandle, wszFileName, ARRAYSIZE(wszFileName));
+    if (cchA == 0 || cchA >= ARRAYSIZE(wszFileName))
+    {
+        return FALSE;
+    }
+
     size_t iDir = cchA;
     while (iDir--)
     {
@@ -1603,44 +1661,554 @@ BOOL CCompositionProcessorEngine::SetupDictionaryFile()
             break;
         }
     }
-    size_t dllDirLen = iDir + 1;   // includes trailing separator
+    size_t dllDirLen = iDir + 1;
 
-    // Locate a shared code table. Both architectures must load ONE dictionary,
-    // so we probe candidate "dict" directories and use the first that exists:
-    //   1. <dllDir>\dict\        -> flat layout: DIME\dime32.dll + DIME\dict\
-    //   2. <dllDir>\..\dict\      -> subfolder layout: DIME\x64\dime.dll + DIME\dict\
-    //   3. <dllDir> (no dict)     -> dev/test flat layout with dictionaries in DLL dir
-    // The dictionary file name is derived by _LoadDictionary from TEXTSERVICE_DIC.
-    const WCHAR* pDictDir = wszFileName;   // default: DLL directory
-    size_t dictDirLen = dllDirLen;
-    WCHAR wszDictDir[MAX_PATH] = {L'\0'};
-
+    // Prefer shared dict\: flat layout, then parent\dict\, else DLL directory.
     struct { const WCHAR* suffix; size_t baseLen; } candidates[] =
     {
-        { L"dict\\", dllDirLen },          // relative to DLL directory
-        { L"..\\dict\\", dllDirLen },      // relative to DLL directory (parent)
+        { L"dict\\", dllDirLen },
+        { L"..\\dict\\", dllDirLen },
     };
 
     for (int c = 0; c < _countof(candidates); c++)
     {
+        WCHAR wszDictDir[MAX_PATH] = {L'\0'};
         if (SUCCEEDED(StringCchCopyN(wszDictDir, ARRAYSIZE(wszDictDir), wszFileName, candidates[c].baseLen)) &&
             SUCCEEDED(StringCchCatW(wszDictDir, ARRAYSIZE(wszDictDir), candidates[c].suffix)))
         {
             DWORD attrs = GetFileAttributes(wszDictDir);
             if (attrs != INVALID_FILE_ATTRIBUTES && (attrs & FILE_ATTRIBUTE_DIRECTORY))
             {
-                pDictDir = wszDictDir;
-                dictDirLen = wcslen(wszDictDir);
-                break;
+                return SUCCEEDED(StringCchCopy(buf, cch, wszDictDir));
             }
         }
     }
 
-    // wubi main dictionary (required for the IME to work)
-    if (!_LoadDictionary(TEXTSERVICE_DIC, pDictDir, dictDirLen, &_pDictionaryFile, &_pTableDictionaryEngine))
+    return SUCCEEDED(StringCchCopyN(buf, cch, wszFileName, dllDirLen));
+}
+
+void CCompositionProcessorEngine::ReadDictionaryNameFromRegistry(_Out_writes_(cch) WCHAR* buf, DWORD cch)
+{
+    if (!buf || cch == 0)
     {
-        DIME_ERROR_LOG(L"SetupDictionaryFile: main wubi dictionary load FAILED (dir=%s)", pDictDir);
+        return;
+    }
+    StringCchCopy(buf, cch, TEXTSERVICE_DIC_STEM);
+
+    CRegKey reg;
+    if (reg.Open(HKEY_CURRENT_USER, L"Software\\DIME") != ERROR_SUCCESS)
+    {
+        return;
+    }
+    WCHAR value[64] = {L'\0'};
+    ULONG chars = ARRAYSIZE(value);
+    if (reg.QueryStringValue(L"Dictionary", value, &chars) != ERROR_SUCCESS || value[0] == L'\0')
+    {
+        return;
+    }
+    if (_IsValidDictionaryStem(value))
+    {
+        StringCchCopy(buf, cch, value);
+    }
+}
+
+void CCompositionProcessorEngine::WriteDictionaryNameToRegistry(_In_z_ LPCWSTR name)
+{
+    if (!_IsValidDictionaryStem(name))
+    {
+        return;
+    }
+    CRegKey reg;
+    if (reg.Create(HKEY_CURRENT_USER, L"Software\\DIME") == ERROR_SUCCESS)
+    {
+        reg.SetStringValue(L"Dictionary", name);
+    }
+}
+
+ULONGLONG CCompositionProcessorEngine::ReadSettingsVersionFromRegistry()
+{
+    CRegKey reg;
+    if (reg.Open(HKEY_CURRENT_USER, L"Software\\DIME") != ERROR_SUCCESS)
+    {
+        return 0;
+    }
+    ULONGLONG ver = 0;
+    if (reg.QueryQWORDValue(L"SettingsVersion", ver) != ERROR_SUCCESS)
+    {
+        return 0;
+    }
+    return ver;
+}
+
+BOOL CCompositionProcessorEngine::IsSyncSettingsOnFocusEnabled()
+{
+    CRegKey reg;
+    if (reg.Open(HKEY_CURRENT_USER, L"Software\\DIME") != ERROR_SUCCESS)
+    {
+        return TRUE; // 默认开启
+    }
+    DWORD dw = 1;
+    if (reg.QueryDWORDValue(L"SyncSettingsOnFocus", dw) != ERROR_SUCCESS)
+    {
+        return TRUE;
+    }
+    return (dw != 0) ? TRUE : FALSE;
+}
+
+void CCompositionProcessorEngine::SetSyncSettingsOnFocusEnabled(BOOL enabled)
+{
+    CRegKey reg;
+    if (reg.Create(HKEY_CURRENT_USER, L"Software\\DIME") == ERROR_SUCCESS)
+    {
+        reg.SetDWORDValue(L"SyncSettingsOnFocus", enabled ? 1 : 0);
+    }
+}
+
+ULONGLONG CCompositionProcessorEngine::BumpSettingsVersionInRegistry()
+{
+    FILETIME ft = {};
+    GetSystemTimeAsFileTime(&ft);
+    ULONGLONG ver = (static_cast<ULONGLONG>(ft.dwHighDateTime) << 32) |
+        static_cast<ULONGLONG>(ft.dwLowDateTime);
+
+    // 保证严格递增, 避免同一 FILETIME 分辨率内连续保存撞车.
+    ULONGLONG prev = ReadSettingsVersionFromRegistry();
+    if (ver <= prev)
+    {
+        ver = prev + 1;
+    }
+
+    CRegKey reg;
+    if (reg.Create(HKEY_CURRENT_USER, L"Software\\DIME") == ERROR_SUCCESS)
+    {
+        reg.SetQWORDValue(L"SettingsVersion", ver);
+    }
+    DIME_DEBUG_LOG(L"BumpSettingsVersion -> %llu", ver);
+    return ver;
+}
+
+void CCompositionProcessorEngine::AcknowledgeSettingsVersion()
+{
+    _settingsVersion = ReadSettingsVersionFromRegistry();
+}
+
+void CCompositionProcessorEngine::ApplySettingsFromRegistryIfNeeded()
+{
+    if (!IsSyncSettingsOnFocusEnabled())
+    {
+        return;
+    }
+
+    ULONGLONG remote = ReadSettingsVersionFromRegistry();
+    if (remote == _settingsVersion)
+    {
+        return;
+    }
+
+    DIME_DEBUG_LOG(L"ApplySettingsFromRegistryIfNeeded local=%llu remote=%llu",
+        _settingsVersion, remote);
+
+    // --- Dictionary ---
+    WCHAR stem[64] = {L'\0'};
+    ReadDictionaryNameFromRegistry(stem, ARRAYSIZE(stem));
+    if (stem[0] != L'\0' && _wcsicmp(stem, _mainDictionaryName) != 0)
+    {
+        SetMainDictionaryName(stem);
+    }
+
+    // --- Input mode compartments (only when TSF client is live) ---
+    BOOL isFullWidth = FALSE;
+    BOOL isChinesePunctuation = TRUE;
+    _LoadSettings(isFullWidth, isChinesePunctuation);
+    BOOL isOnlyCommon = _ReadRegistryOnlyCommon();
+
+    if (_pThreadMgr != nullptr && _tfClientId != TF_CLIENTID_NULL)
+    {
+        CCompartment compartmentFull(_pThreadMgr, _tfClientId, Global::DIMEGuidCompartmentDoubleSingleByte);
+        CCompartment compartmentPunct(_pThreadMgr, _tfClientId, Global::DIMEGuidCompartmentPunctuation);
+        CCompartment compartmentOnly(_pThreadMgr, _tfClientId, Global::DIMEGuidCompartmentOnlyCommon);
+        compartmentFull._SetCompartmentBOOL(isFullWidth);
+        compartmentPunct._SetCompartmentBOOL(isChinesePunctuation);
+        compartmentOnly._SetCompartmentBOOL(isOnlyCommon);
+    }
+
+    _isOnlyCommon = isOnlyCommon;
+    if (_pTableDictionaryEngine)
+    {
+        _pTableDictionaryEngine->SetOnlyCommon(_isOnlyCommon);
+    }
+    if (_pPinyinDictionaryEngine)
+    {
+        _pPinyinDictionaryEngine->SetOnlyCommon(_isOnlyCommon);
+    }
+
+    // --- Engine options (re-read like SetupConfiguration) ---
+    CRegKey reg;
+    if (reg.Open(HKEY_CURRENT_USER, L"Software\\DIME") == ERROR_SUCCESS)
+    {
+        DWORD dw = 0;
+        if (reg.QueryDWORDValue(L"EnglishCommaPeriodAfterDigit", dw) == ERROR_SUCCESS)
+        {
+            _englishCommaPeriodAfterDigit = (dw != 0) ? TRUE : FALSE;
+        }
+        if (reg.QueryDWORDValue(L"EmptyCodeSearchFull", dw) == ERROR_SUCCESS)
+        {
+            _emptyCodeSearchFull = (dw != 0) ? TRUE : FALSE;
+            if (_pTableDictionaryEngine)
+            {
+                _pTableDictionaryEngine->SetEmptyCodeSearchFull(_emptyCodeSearchFull);
+            }
+            if (_pPinyinDictionaryEngine)
+            {
+                _pPinyinDictionaryEngine->SetEmptyCodeSearchFull(_emptyCodeSearchFull);
+            }
+        }
+        if (reg.QueryDWORDValue(L"CandidatesPerPage", dw) == ERROR_SUCCESS &&
+            dw >= 1 && dw <= 10)
+        {
+            _candidatePageSize = static_cast<int>(dw);
+            SetInitialCandidateListRange(_candidatePageSize);
+        }
+        if (reg.QueryDWORDValue(L"CandidateFontSize", dw) == ERROR_SUCCESS &&
+            (dw == 0 || dw == 12 || dw == 14 || dw == 16 || dw == 18 ||
+             dw == 20 || dw == 24 || dw == 28 || dw == 32))
+        {
+            _candidateFontSize = static_cast<int>(dw);
+            SetDefaultCandidateTextFont();
+        }
+
+        BOOL hkOnly = TRUE, hkPunct = TRUE, hkFull = TRUE;
+        if (reg.QueryDWORDValue(L"HotkeyOnlyCommon", dw) == ERROR_SUCCESS)
+        {
+            hkOnly = (dw != 0) ? TRUE : FALSE;
+        }
+        if (reg.QueryDWORDValue(L"HotkeyPunctuation", dw) == ERROR_SUCCESS)
+        {
+            hkPunct = (dw != 0) ? TRUE : FALSE;
+        }
+        if (reg.QueryDWORDValue(L"HotkeyDoubleSingleByte", dw) == ERROR_SUCCESS)
+        {
+            hkFull = (dw != 0) ? TRUE : FALSE;
+        }
+
+        // 热键开关: 只改注册状态, 不再写回注册表 (避免 bump).
+        if (_pThreadMgr && _tfClientId != TF_CLIENTID_NULL)
+        {
+            if (hkOnly != _hotkeyOnlyCommonEnabled)
+            {
+                _hotkeyOnlyCommonEnabled = hkOnly;
+                if (_hotkeyOnlyCommonEnabled)
+                {
+                    InitPreservedKey(&_PreservedKey_OnlyCommon, _pThreadMgr, _tfClientId);
+                }
+                else
+                {
+                    _PreservedKey_OnlyCommon.UninitPreservedKey(_pThreadMgr);
+                }
+            }
+            if (hkPunct != _hotkeyPunctuationEnabled)
+            {
+                _hotkeyPunctuationEnabled = hkPunct;
+                if (_hotkeyPunctuationEnabled)
+                {
+                    InitPreservedKey(&_PreservedKey_Punctuation, _pThreadMgr, _tfClientId);
+                }
+                else
+                {
+                    _PreservedKey_Punctuation.UninitPreservedKey(_pThreadMgr);
+                }
+            }
+            if (hkFull != _hotkeyDoubleSingleByteEnabled)
+            {
+                _hotkeyDoubleSingleByteEnabled = hkFull;
+                if (_hotkeyDoubleSingleByteEnabled)
+                {
+                    InitPreservedKey(&_PreservedKey_DoubleSingleByte, _pThreadMgr, _tfClientId);
+                }
+                else
+                {
+                    _PreservedKey_DoubleSingleByte.UninitPreservedKey(_pThreadMgr);
+                }
+            }
+        }
+        else
+        {
+            _hotkeyOnlyCommonEnabled = hkOnly;
+            _hotkeyPunctuationEnabled = hkPunct;
+            _hotkeyDoubleSingleByteEnabled = hkFull;
+        }
+
+        // 状态栏显隐
+        if (_pTextService)
+        {
+            CStatusWindow* sw = _pTextService->_GetStatusWindow();
+            if (sw != nullptr)
+            {
+                sw->_LoadHiddenState();
+            }
+        }
+    }
+
+    if (_pTextService)
+    {
+        _pTextService->_ResetInputForModeChange();
+        _pTextService->_RefreshStatusWindow();
+        _pTextService->_RefreshCandidateInputModeStatus();
+    }
+    else if (_pThreadMgr)
+    {
+        NotifyInputModeChanged(_pThreadMgr);
+    }
+
+    _settingsVersion = remote;
+}
+
+BOOL CCompositionProcessorEngine::_IsValidDictionaryStem(_In_z_ LPCWSTR name)
+{
+    if (!name || name[0] == L'\0')
+    {
         return FALSE;
+    }
+    // 禁止路径分隔与扩展名, 避免越出 dict 目录.
+    for (const WCHAR* p = name; *p; ++p)
+    {
+        if (*p == L'\\' || *p == L'/' || *p == L':' || *p == L'.' ||
+            *p == L'*' || *p == L'?' || *p == L'"' || *p == L'<' ||
+            *p == L'>' || *p == L'|')
+        {
+            return FALSE;
+        }
+    }
+    if (_wcsicmp(name, L"pinyin") == 0)
+    {
+        return FALSE;
+    }
+    return TRUE;
+}
+
+int CCompositionProcessorEngine::EnumerateMainDictionaries(_Out_writes_(maxCount) DictionaryListItem* items, int maxCount)
+{
+    if (!items || maxCount <= 0)
+    {
+        return 0;
+    }
+
+    WCHAR dictDir[MAX_PATH] = {L'\0'};
+    if (!ResolveDictionaryDirectory(dictDir, ARRAYSIZE(dictDir)))
+    {
+        return 0;
+    }
+
+    WCHAR pattern[MAX_PATH] = {L'\0'};
+    if (FAILED(StringCchCopy(pattern, ARRAYSIZE(pattern), dictDir)) ||
+        FAILED(StringCchCat(pattern, ARRAYSIZE(pattern), L"*.bin")))
+    {
+        return 0;
+    }
+
+    int count = 0;
+    WIN32_FIND_DATAW fd = {0};
+    HANDLE hFind = FindFirstFileW(pattern, &fd);
+    if (hFind == INVALID_HANDLE_VALUE)
+    {
+        return 0;
+    }
+
+    do
+    {
+        if (fd.dwFileAttributes & FILE_ATTRIBUTE_DIRECTORY)
+        {
+            continue;
+        }
+        if (_wcsicmp(fd.cFileName, TEXTSERVICE_PINYIN_BIN) == 0)
+        {
+            continue;
+        }
+        WCHAR stem[64] = {L'\0'};
+        StringCchCopy(stem, ARRAYSIZE(stem), fd.cFileName);
+        WCHAR* dot = wcsrchr(stem, L'.');
+        if (dot)
+        {
+            *dot = L'\0';
+        }
+        if (!_IsValidDictionaryStem(stem))
+        {
+            continue;
+        }
+        if (count >= maxCount)
+        {
+            continue;
+        }
+
+        DictionaryListItem& item = items[count];
+        StringCchCopy(item.stem, ARRAYSIZE(item.stem), stem);
+        // 默认显示名为文件名; 有 NAME 属性时覆盖.
+        StringCchCopy(item.displayName, ARRAYSIZE(item.displayName), stem);
+
+        WCHAR binPath[MAX_PATH] = {L'\0'};
+        if (SUCCEEDED(StringCchCopy(binPath, ARRAYSIZE(binPath), dictDir)) &&
+            SUCCEEDED(StringCchCat(binPath, ARRAYSIZE(binPath), fd.cFileName)))
+        {
+            DictConfig cfg;
+            if (CBinaryDictionaryEngine::ReadConfigFromFile(binPath, cfg) && !cfg.name.empty())
+            {
+                StringCchCopy(item.displayName, ARRAYSIZE(item.displayName), cfg.name.c_str());
+            }
+        }
+        ++count;
+    } while (FindNextFileW(hFind, &fd));
+
+    FindClose(hFind);
+
+    // 按显示名排序.
+    for (int i = 0; i + 1 < count; ++i)
+    {
+        for (int j = i + 1; j < count; ++j)
+        {
+            if (_wcsicmp(items[i].displayName, items[j].displayName) > 0)
+            {
+                DictionaryListItem tmp = items[i];
+                items[i] = items[j];
+                items[j] = tmp;
+            }
+        }
+    }
+    return count;
+}
+
+void CCompositionProcessorEngine::GetMainDictionaryName(_Out_writes_(cch) WCHAR* buf, DWORD cch) const
+{
+    if (!buf || cch == 0)
+    {
+        return;
+    }
+    if (_mainDictionaryName[0] != L'\0')
+    {
+        StringCchCopy(buf, cch, _mainDictionaryName);
+    }
+    else
+    {
+        ReadDictionaryNameFromRegistry(buf, cch);
+    }
+}
+
+void CCompositionProcessorEngine::_UnloadMainDictionary()
+{
+    if (_pTableDictionaryEngine)
+    {
+        delete _pTableDictionaryEngine;
+        _pTableDictionaryEngine = nullptr;
+    }
+    if (_pDictionaryFile)
+    {
+        delete _pDictionaryFile;
+        _pDictionaryFile = nullptr;
+    }
+}
+
+BOOL CCompositionProcessorEngine::_LoadMainDictionaryFromStem(_In_z_ LPCWSTR stem, _In_ LPCWSTR pwszDir, size_t dirLen)
+{
+    if (!_IsValidDictionaryStem(stem))
+    {
+        return FALSE;
+    }
+    WCHAR dicFile[80] = {L'\0'};
+    if (FAILED(StringCchPrintf(dicFile, ARRAYSIZE(dicFile), L"%s.txt", stem)))
+    {
+        return FALSE;
+    }
+    return _LoadDictionary(dicFile, pwszDir, dirLen, &_pDictionaryFile, &_pTableDictionaryEngine);
+}
+
+BOOL CCompositionProcessorEngine::SetMainDictionaryName(_In_z_ LPCWSTR name)
+{
+    if (!_IsValidDictionaryStem(name))
+    {
+        return FALSE;
+    }
+
+    WriteDictionaryNameToRegistry(name);
+
+    // 未激活引擎时只写注册表; 下次 Activate 再加载.
+    if (_pTableDictionaryEngine == nullptr && _pDictionaryFile == nullptr)
+    {
+        StringCchCopy(_mainDictionaryName, ARRAYSIZE(_mainDictionaryName), name);
+        return TRUE;
+    }
+
+    if (_wcsicmp(_mainDictionaryName, name) == 0 && _pTableDictionaryEngine != nullptr)
+    {
+        return TRUE;
+    }
+
+    WCHAR dictDir[MAX_PATH] = {L'\0'};
+    if (!ResolveDictionaryDirectory(dictDir, ARRAYSIZE(dictDir)))
+    {
+        return FALSE;
+    }
+
+    _UnloadMainDictionary();
+    if (!_LoadMainDictionaryFromStem(name, dictDir, wcslen(dictDir)))
+    {
+        // 回退到默认 wubi98.
+        DIME_ERROR_LOG(L"SetMainDictionaryName: load %s failed, fallback to %s", name, TEXTSERVICE_DIC_STEM);
+        if (!_LoadMainDictionaryFromStem(TEXTSERVICE_DIC_STEM, dictDir, wcslen(dictDir)))
+        {
+            return FALSE;
+        }
+        StringCchCopy(_mainDictionaryName, ARRAYSIZE(_mainDictionaryName), TEXTSERVICE_DIC_STEM);
+        WriteDictionaryNameToRegistry(TEXTSERVICE_DIC_STEM);
+    }
+    else
+    {
+        StringCchCopy(_mainDictionaryName, ARRAYSIZE(_mainDictionaryName), name);
+    }
+
+    if (_pTableDictionaryEngine)
+    {
+        _pTableDictionaryEngine->SetOnlyCommon(_isOnlyCommon);
+        _pTableDictionaryEngine->SetEmptyCodeSearchFull(_emptyCodeSearchFull);
+    }
+
+    if (_pTextService)
+    {
+        _pTextService->_ResetInputForModeChange();
+    }
+    return TRUE;
+}
+
+BOOL CCompositionProcessorEngine::SetupDictionaryFile()
+{
+    WCHAR wszDictDir[MAX_PATH] = {L'\0'};
+    if (!ResolveDictionaryDirectory(wszDictDir, ARRAYSIZE(wszDictDir)))
+    {
+        DIME_ERROR_LOG(L"SetupDictionaryFile: cannot resolve dict directory");
+        return FALSE;
+    }
+    size_t dictDirLen = wcslen(wszDictDir);
+    const WCHAR* pDictDir = wszDictDir;
+
+    WCHAR stem[64] = {L'\0'};
+    ReadDictionaryNameFromRegistry(stem, ARRAYSIZE(stem));
+
+    // 主词库 (必需); 所选词库失败时回退 wubi98.
+    if (!_LoadMainDictionaryFromStem(stem, pDictDir, dictDirLen))
+    {
+        DIME_WARNING_LOG(L"SetupDictionaryFile: load %s failed, try default %s", stem, TEXTSERVICE_DIC_STEM);
+        if (_wcsicmp(stem, TEXTSERVICE_DIC_STEM) != 0 &&
+            _LoadMainDictionaryFromStem(TEXTSERVICE_DIC_STEM, pDictDir, dictDirLen))
+        {
+            StringCchCopy(_mainDictionaryName, ARRAYSIZE(_mainDictionaryName), TEXTSERVICE_DIC_STEM);
+        }
+        else
+        {
+            DIME_ERROR_LOG(L"SetupDictionaryFile: main wubi dictionary load FAILED (dir=%s)", pDictDir);
+            return FALSE;
+        }
+    }
+    else
+    {
+        StringCchCopy(_mainDictionaryName, ARRAYSIZE(_mainDictionaryName), stem);
     }
 
     // pinyin dictionary (optional, enables temporary pinyin input via 'z')

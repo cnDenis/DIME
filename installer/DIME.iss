@@ -94,6 +94,8 @@ Source: "{#MyDist}\dime64.dll"; DestDir: "{app}"; Flags: ignoreversion restartre
 Source: "{#MyDist}\dime32.dll"; DestDir: "{app}"; Flags: ignoreversion restartreplace uninsrestartdelete
 ; build_bindict.exe lives next to the DLLs; the runtime probes it there first.
 Source: "{#MyDist}\build_bindict.exe"; DestDir: "{app}"; Flags: ignoreversion
+; Settings entry: open the same panel as language-settings Options / status-bar menu.
+Source: "{#MyDist}\dime_config.exe"; DestDir: "{app}"; Flags: ignoreversion
 ; 码表: 全新安装必写; 升级时若勾选「保留现有码表」则跳过 (见 ShouldInstallDict)
 Source: "{#MyDist}\dict\*"; DestDir: "{app}\dict"; Flags: ignoreversion recursesubdirs createallsubdirs restartreplace; Check: ShouldInstallDict
 

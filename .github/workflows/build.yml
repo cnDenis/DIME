@@ -47,8 +47,8 @@ jobs:
       - name: Compile binary dictionaries
         shell: pwsh
         run: |
-          out/x64/Release/build_bindict.exe Dictionary/wubi98.txt Dictionary/wubi98.bin
-          out/x64/Release/build_bindict.exe Dictionary/pinyin.txt Dictionary/pinyin.bin --max-code 24
+          # No-arg mode: compile every Dictionary\*.txt (pinyin gets --max-code 24).
+          out/x64/Release/build_bindict.exe
 
       - name: Assemble dist layout
         shell: pwsh
@@ -58,7 +58,9 @@ jobs:
           Copy-Item out/x64/Release/dime.dll        "$dist/dime64.dll"
           Copy-Item out/x86/Release/dime.dll        "$dist/dime32.dll"
           Copy-Item out/x64/Release/build_bindict.exe "$dist/"
-          Copy-Item Dictionary/wubi98.txt, Dictionary/pinyin.txt, Dictionary/wubi98.bin, Dictionary/pinyin.bin "$dist/dict/"
+          Copy-Item out/x64/Release/dime_config.exe "$dist/"
+          Copy-Item Dictionary/*.txt, Dictionary/*.bin "$dist/dict/"
+          Get-ChildItem "$dist/dict" | ForEach-Object { $_.Name }
 
       - name: Install Inno Setup
         run: choco install innosetup --no-progress -y

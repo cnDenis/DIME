@@ -739,6 +739,12 @@ void CStatusWindow::_OnLButtonUp(POINT pt)
         return;
     }
 
+    // 英文态灰显时不响应全/半角, 标点, 常/全的点击.
+    if (_isGrayed)
+    {
+        return;
+    }
+
     int hit = _HitTest(pt);
     if (hit >= 0 && _pfnCallback != nullptr)
     {

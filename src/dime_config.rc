@@ -1,0 +1,2 @@
+// dime_config.exe — Explorer icon (DPI awareness comes from the linker manifest).
+1 ICON "..\\image\\Dime.ico"

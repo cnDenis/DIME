@@ -21,13 +21,14 @@ if not exist "%ROOT%\out\x86\CMakeCache.txt" (
     if errorlevel 1 exit /b 1
 )
 
-"%MSBUILD%" "%ROOT%\out\x64\dime.sln" /p:Configuration=Release /m /v:minimal
+"%MSBUILD%" "%ROOT%\out\x64\ALL_BUILD.vcxproj" /p:Configuration=Release /m /v:minimal
 if errorlevel 1 exit /b 1
 
-"%MSBUILD%" "%ROOT%\out\x86\dime.sln" /p:Configuration=Release /m /v:minimal
+"%MSBUILD%" "%ROOT%\out\x86\ALL_BUILD.vcxproj" /p:Configuration=Release /m /v:minimal
 if errorlevel 1 exit /b 1
 
 echo.
 echo x64 : %ROOT%\out\x64\Release\dime.dll
 echo x86 : %ROOT%\out\x86\Release\dime.dll
+echo cfg : %ROOT%\out\x64\Release\dime_config.exe
 exit /b 0

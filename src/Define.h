@@ -11,8 +11,10 @@
 #define TEXTSERVICE_LANGID       MAKELANGID(LANG_CHINESE, SUBLANG_CHINESE_SIMPLIFIED)
 // RegisterProfile uIconIndex: 0-based icon order in dime.dll (see DIME.rc ICON list), not resource ID.
 #define TEXTSERVICE_ICON_INDEX       0
+#define TEXTSERVICE_DIC_STEM L"wubi98"
 #define TEXTSERVICE_DIC L"wubi98.txt"
 #define TEXTSERVICE_PINYIN_DIC L"pinyin.txt"
+#define TEXTSERVICE_PINYIN_BIN L"pinyin.bin"
 
 #define WUBI_MAX_CODE_LENGTH    4
 #define PINYIN_MAX_CODE_LENGTH  24

@@ -25,10 +25,9 @@ enum
     IDC_CAT_LIST        = 100,
 
     IDC_PANEL_INPUT     = 200,
-    IDC_PANEL_CAND      = 201,
-    IDC_PANEL_UI        = 202,
-    IDC_PANEL_HOTKEY    = 203,
-    IDC_PANEL_ABOUT     = 204,
+    IDC_PANEL_UI        = 201,
+    IDC_PANEL_HOTKEY    = 202,
+    IDC_PANEL_ABOUT     = 203,
 
     IDC_GRP_DSB         = 210,
     IDC_RADIO_HALF      = 211,
@@ -39,6 +38,9 @@ enum
     IDC_CHK_ONLYCOMMON  = 216,
     IDC_CHK_DIGIT_EN_PUNCT = 217,
     IDC_CHK_EMPTY_CODE_FULL = 218,
+    IDC_ST_DICT_LBL     = 219,
+    IDC_CMB_DICT        = 223,
+    IDC_CHK_SYNC_SETTINGS = 224,
 
     IDC_ST_PAGECNT_LBL  = 220,
     IDC_CMB_PAGECNT     = 221,
@@ -64,7 +66,7 @@ enum
 
 // Sample key used by the candidate-window preview on the Interface tab.
 static const WCHAR kPreviewKey[] = L"aa";
-static const int kPreviewCandMax = 5;
+static const int kPreviewCandMax = 10; // matches max CandidatesPerPage
 
 struct PreviewCand
 {
@@ -78,7 +80,7 @@ struct DlgState
     HWND     hwndOwner    = nullptr;
     HWND     hwndCatList  = nullptr;
     HWND     hwndClose    = nullptr;
-    HWND     hwndPanels[5] = { nullptr, nullptr, nullptr, nullptr, nullptr };
+    HWND     hwndPanels[4] = { nullptr, nullptr, nullptr, nullptr };
     HWND     hwndPreview  = nullptr;
     RECT     rcList       = {0,0,0,0};
     HFONT    hFont        = nullptr;
@@ -86,6 +88,9 @@ struct DlgState
     int      previewFontPx = 0;
     PreviewCand previewCands[kPreviewCandMax] = {};
     int      previewCandCount = 0;
+    // 词库下拉: 显示 NAME, 保存时用 stem (CB_ITEMDATA -> 下标).
+    CCompositionProcessorEngine::DictionaryListItem dictItems[64] = {};
+    int      dictItemCount = 0;
 };
 
 static WNDPROC s_prevPreviewWndProc = nullptr;
@@ -141,6 +146,58 @@ static void _RegSetDWORD(_In_z_ LPCWSTR name, DWORD value)
     }
 }
 
+static void _PopulateDictionaryCombo(_In_ DlgState* pState, _In_ HWND cmb, _In_z_ LPCWSTR selectedStem)
+{
+    if (pState == nullptr || cmb == nullptr)
+    {
+        return;
+    }
+    SendMessage(cmb, CB_RESETCONTENT, 0, 0);
+    pState->dictItemCount = CCompositionProcessorEngine::EnumerateMainDictionaries(
+        pState->dictItems, ARRAYSIZE(pState->dictItems));
+
+    int sel = CB_ERR;
+    for (int i = 0; i < pState->dictItemCount; ++i)
+    {
+        int idx = (int)SendMessage(cmb, CB_ADDSTRING, 0, (LPARAM)pState->dictItems[i].displayName);
+        if (idx >= 0)
+        {
+            SendMessage(cmb, CB_SETITEMDATA, idx, (LPARAM)i);
+        }
+        if (selectedStem != nullptr && selectedStem[0] != L'\0' &&
+            _wcsicmp(pState->dictItems[i].stem, selectedStem) == 0)
+        {
+            sel = idx;
+        }
+    }
+
+    // 当前选择的 .bin 不在列表中时, 用 stem 本身作为显示项补上.
+    if (selectedStem != nullptr && selectedStem[0] != L'\0' && sel == CB_ERR)
+    {
+        if (pState->dictItemCount < ARRAYSIZE(pState->dictItems))
+        {
+            int i = pState->dictItemCount++;
+            StringCchCopy(pState->dictItems[i].stem, ARRAYSIZE(pState->dictItems[i].stem), selectedStem);
+            StringCchCopy(pState->dictItems[i].displayName, ARRAYSIZE(pState->dictItems[i].displayName), selectedStem);
+            int idx = (int)SendMessage(cmb, CB_INSERTSTRING, 0, (LPARAM)pState->dictItems[i].displayName);
+            if (idx >= 0)
+            {
+                SendMessage(cmb, CB_SETITEMDATA, idx, (LPARAM)i);
+                sel = idx;
+            }
+        }
+    }
+
+    if (sel != CB_ERR)
+    {
+        SendMessage(cmb, CB_SETCURSEL, sel, 0);
+    }
+    else if (pState->dictItemCount > 0)
+    {
+        SendMessage(cmb, CB_SETCURSEL, 0, 0);
+    }
+}
+
 static HWND _CreateCtrl(_In_ HWND parent, _In_ LPCWSTR cls, _In_opt_ LPCWSTR text,
                         DWORD style, int x, int y, int w, int h, int id, _In_opt_ HFONT hFont)
 {
@@ -160,8 +217,8 @@ static WCHAR _ToLowerPreviewChar(WCHAR ch)
 
 static int _GetComboFontPx(_In_ DlgState* pState)
 {
-    HWND cmb = (pState->hwndPanels[2] != nullptr)
-        ? GetDlgItem(pState->hwndPanels[2], IDC_CMB_FONTSIZE) : nullptr;
+    HWND cmb = (pState->hwndPanels[1] != nullptr)
+        ? GetDlgItem(pState->hwndPanels[1], IDC_CMB_FONTSIZE) : nullptr;
     int sel = 0;
     if (cmb != nullptr)
     {
@@ -179,17 +236,36 @@ static int _GetComboFontPx(_In_ DlgState* pState)
     return px;
 }
 
+static int _GetComboPageCount(_In_ DlgState* pState)
+{
+    HWND cmb = (pState->hwndPanels[1] != nullptr)
+        ? GetDlgItem(pState->hwndPanels[1], IDC_CMB_PAGECNT) : nullptr;
+    int ps = 10;
+    if (cmb != nullptr)
+    {
+        int sel = (int)SendMessage(cmb, CB_GETCURSEL, 0, 0);
+        if (sel >= 0)
+        {
+            ps = sel + 1;
+        }
+    }
+    if (ps < 1) ps = 1;
+    if (ps > kPreviewCandMax) ps = kPreviewCandMax;
+    return ps;
+}
+
 static void _LoadPreviewCandidates(_In_ DlgState* pState)
 {
     pState->previewCandCount = 0;
+    const int want = _GetComboPageCount(pState);
     CCompositionProcessorEngine* eng =
         (pState->pTextService != nullptr) ? pState->pTextService->GetCompositionProcessorEngine() : nullptr;
 
     if (eng != nullptr)
     {
         CDIMEArray<CCandidateListItem> list;
-        eng->GetPreviewCandidateList(kPreviewKey, &list, kPreviewCandMax);
-        UINT n = min(list.Count(), (UINT)kPreviewCandMax);
+        eng->GetPreviewCandidateList(kPreviewKey, &list, (UINT)want);
+        UINT n = min(list.Count(), (UINT)want);
         for (UINT i = 0; i < n; ++i)
         {
             CCandidateListItem* pLI = list.GetAt(i);
@@ -226,21 +302,24 @@ static void _LoadPreviewCandidates(_In_ DlgState* pState)
         }
     }
 
-    // Fallback when the dictionary is not ready yet.
-    if (pState->previewCandCount == 0)
+    // Pad / fill so the preview always shows exactly the selected page size.
+    static const PreviewCand kFallback[] = {
+        { L"式", L"" },
+        { L"藏", L"" },
+        { L"戒", L"" },
+        { L"工", L"a" },
+        { L"藏匿", L"aa" },
+        { L"式样", L"aa" },
+        { L"工整", L"aa" },
+        { L"戒备", L"aa" },
+        { L"式子", L"aa" },
+        { L"工匠", L"aa" },
+    };
+    while (pState->previewCandCount < want)
     {
-        static const PreviewCand kFallback[] = {
-            { L"式", L"" },
-            { L"藏", L"" },
-            { L"戒", L"" },
-            { L"工", L"a" },
-            { L"藏匿", L"aa" },
-        };
-        for (int i = 0; i < ARRAYSIZE(kFallback) && i < kPreviewCandMax; ++i)
-        {
-            pState->previewCands[i] = kFallback[i];
-        }
-        pState->previewCandCount = min(ARRAYSIZE(kFallback), kPreviewCandMax);
+        int i = pState->previewCandCount;
+        pState->previewCands[i] = kFallback[i % ARRAYSIZE(kFallback)];
+        pState->previewCandCount++;
     }
 }
 
@@ -539,7 +618,7 @@ static LRESULT CALLBACK _PanelWndProc(_In_ HWND hWnd, UINT uMsg, WPARAM wParam, 
 
 static void _ShowCategory(_In_ DlgState* pState, int sel)
 {
-    for (int i = 0; i < 5; ++i)
+    for (int i = 0; i < 4; ++i)
     {
         if (pState->hwndPanels[i] != nullptr)
         {
@@ -597,8 +676,36 @@ static void _InitStates(_In_ DlgState* pState)
     CheckDlgButton(panel, IDC_CHK_ONLYCOMMON, onlyCommon ? BST_CHECKED : BST_UNCHECKED);
     CheckDlgButton(panel, IDC_CHK_DIGIT_EN_PUNCT, digitEnPunct ? BST_CHECKED : BST_UNCHECKED);
     CheckDlgButton(panel, IDC_CHK_EMPTY_CODE_FULL, emptyCodeFull ? BST_CHECKED : BST_UNCHECKED);
+    {
+        BOOL syncOnFocus = TRUE;
+        DWORD dw = 1;
+        if (_RegGetDWORD(L"SyncSettingsOnFocus", 1, dw))
+        {
+            syncOnFocus = (dw != 0);
+        }
+        CheckDlgButton(panel, IDC_CHK_SYNC_SETTINGS,
+            syncOnFocus ? BST_CHECKED : BST_UNCHECKED);
+    }
 
-    // --- Candidate options (page size) ---
+    // --- Dictionary ---
+    {
+        WCHAR dictName[64] = {L'\0'};
+        if (eng != nullptr)
+        {
+            eng->GetMainDictionaryName(dictName, ARRAYSIZE(dictName));
+        }
+        else
+        {
+            CCompositionProcessorEngine::ReadDictionaryNameFromRegistry(dictName, ARRAYSIZE(dictName));
+        }
+        HWND cmbDict = GetDlgItem(panel, IDC_CMB_DICT);
+        _PopulateDictionaryCombo(pState, cmbDict, dictName);
+    }
+
+    // --- Interface (status bar, page size, font) ---
+    BOOL hidden = (p->_GetStatusWindow() != nullptr) ? p->_GetStatusWindow()->_IsHiddenByUser() : FALSE;
+    CheckDlgButton(pState->hwndPanels[1], IDC_CHK_SHOWSTATUS, hidden ? BST_UNCHECKED : BST_CHECKED);
+
     {
         int ps = 10;
         if (eng != nullptr)
@@ -620,10 +727,6 @@ static void _InitStates(_In_ DlgState* pState)
         }
     }
 
-    // --- Interface ---
-    BOOL hidden = (p->_GetStatusWindow() != nullptr) ? p->_GetStatusWindow()->_IsHiddenByUser() : FALSE;
-    CheckDlgButton(pState->hwndPanels[2], IDC_CHK_SHOWSTATUS, hidden ? BST_UNCHECKED : BST_CHECKED);
-
     {
         int px = 0;
         if (eng != nullptr)
@@ -636,7 +739,7 @@ static void _InitStates(_In_ DlgState* pState)
             _RegGetDWORD(L"CandidateFontSize", 0, dw);
             px = (int)dw;
         }
-        HWND cmbFont = GetDlgItem(pState->hwndPanels[2], IDC_CMB_FONTSIZE);
+        HWND cmbFont = GetDlgItem(pState->hwndPanels[1], IDC_CMB_FONTSIZE);
         if (cmbFont != nullptr)
         {
             int sel = 0;
@@ -667,10 +770,11 @@ static void _InitStates(_In_ DlgState* pState)
         if (_RegGetDWORD(L"HotkeyPunctuation", 1, dw)) hkPunct = (dw != 0);
         if (_RegGetDWORD(L"HotkeyDoubleSingleByte", 1, dw)) hkFull = (dw != 0);
     }
-    CheckDlgButton(pState->hwndPanels[3], IDC_CHK_HOTKEY_ONLYCOMMON, hkOnly ? BST_CHECKED : BST_UNCHECKED);
-    CheckDlgButton(pState->hwndPanels[3], IDC_CHK_HOTKEY_PUNCTUATION, hkPunct ? BST_CHECKED : BST_UNCHECKED);
-    CheckDlgButton(pState->hwndPanels[3], IDC_CHK_HOTKEY_FULLHALF, hkFull ? BST_CHECKED : BST_UNCHECKED);
+    CheckDlgButton(pState->hwndPanels[2], IDC_CHK_HOTKEY_ONLYCOMMON, hkOnly ? BST_CHECKED : BST_UNCHECKED);
+    CheckDlgButton(pState->hwndPanels[2], IDC_CHK_HOTKEY_PUNCTUATION, hkPunct ? BST_CHECKED : BST_UNCHECKED);
+    CheckDlgButton(pState->hwndPanels[2], IDC_CHK_HOTKEY_FULLHALF, hkFull ? BST_CHECKED : BST_UNCHECKED);
 
+    _LoadPreviewCandidates(pState);
     _UpdatePreviewLayout(pState);
 }
 
@@ -692,6 +796,25 @@ static void _OnSettingChanged(_In_ DlgState* pState)
     BOOL digitEnPunct = (IsDlgButtonChecked(pState->hwndPanels[0], IDC_CHK_DIGIT_EN_PUNCT) == BST_CHECKED);
     BOOL emptyCodeFull = (IsDlgButtonChecked(pState->hwndPanels[0], IDC_CHK_EMPTY_CODE_FULL) == BST_CHECKED);
 
+    WCHAR dictName[64] = {L'\0'};
+    HWND cmbDict = GetDlgItem(pState->hwndPanels[0], IDC_CMB_DICT);
+    if (cmbDict != nullptr)
+    {
+        int sel = (int)SendMessage(cmbDict, CB_GETCURSEL, 0, 0);
+        if (sel >= 0)
+        {
+            int itemIdx = (int)SendMessage(cmbDict, CB_GETITEMDATA, sel, 0);
+            if (itemIdx >= 0 && itemIdx < pState->dictItemCount)
+            {
+                StringCchCopy(dictName, ARRAYSIZE(dictName), pState->dictItems[itemIdx].stem);
+            }
+        }
+    }
+    if (dictName[0] == L'\0')
+    {
+        StringCchCopy(dictName, ARRAYSIZE(dictName), TEXTSERVICE_DIC_STEM);
+    }
+
     int ps = 10;
     HWND cmb = GetDlgItem(pState->hwndPanels[1], IDC_CMB_PAGECNT);
     if (cmb != nullptr)
@@ -702,7 +825,7 @@ static void _OnSettingChanged(_In_ DlgState* pState)
     }
 
     int fontPx = 0;
-    HWND cmbFont = GetDlgItem(pState->hwndPanels[2], IDC_CMB_FONTSIZE);
+    HWND cmbFont = GetDlgItem(pState->hwndPanels[1], IDC_CMB_FONTSIZE);
     if (cmbFont != nullptr)
     {
         int sel = (int)SendMessage(cmbFont, CB_GETCURSEL, 0, 0);
@@ -713,9 +836,9 @@ static void _OnSettingChanged(_In_ DlgState* pState)
         fontPx = kFontSizeChoices[sel];
     }
 
-    BOOL hkOnly = (IsDlgButtonChecked(pState->hwndPanels[3], IDC_CHK_HOTKEY_ONLYCOMMON) == BST_CHECKED);
-    BOOL hkPunct = (IsDlgButtonChecked(pState->hwndPanels[3], IDC_CHK_HOTKEY_PUNCTUATION) == BST_CHECKED);
-    BOOL hkFull = (IsDlgButtonChecked(pState->hwndPanels[3], IDC_CHK_HOTKEY_FULLHALF) == BST_CHECKED);
+    BOOL hkOnly = (IsDlgButtonChecked(pState->hwndPanels[2], IDC_CHK_HOTKEY_ONLYCOMMON) == BST_CHECKED);
+    BOOL hkPunct = (IsDlgButtonChecked(pState->hwndPanels[2], IDC_CHK_HOTKEY_PUNCTUATION) == BST_CHECKED);
+    BOOL hkFull = (IsDlgButtonChecked(pState->hwndPanels[2], IDC_CHK_HOTKEY_FULLHALF) == BST_CHECKED);
 
     if (eng != nullptr)
     {
@@ -725,6 +848,7 @@ static void _OnSettingChanged(_In_ DlgState* pState)
             eng->SetPunctuation(tm, id, punctCN);
             eng->SetOnlyCommon(tm, id, onlyCommon);
         }
+        eng->SetMainDictionaryName(dictName);
         eng->SetEnglishCommaPeriodAfterDigit(digitEnPunct);
         eng->SetEmptyCodeSearchFull(emptyCodeFull);
         eng->SetCandidatePageSize(ps);
@@ -737,6 +861,7 @@ static void _OnSettingChanged(_In_ DlgState* pState)
     {
         // Unactivated instance from Settings Options: persist to registry only.
         // Running IME processes pick these up on next Activate / restart.
+        CCompositionProcessorEngine::WriteDictionaryNameToRegistry(dictName);
         _RegSetDWORD(L"DoubleSingleByte", fullWidth ? 1 : 0);
         _RegSetDWORD(L"Punctuation", punctCN ? 1 : 0);
         _RegSetDWORD(L"OnlyCommon", onlyCommon ? 1 : 0);
@@ -749,12 +874,21 @@ static void _OnSettingChanged(_In_ DlgState* pState)
         _RegSetDWORD(L"HotkeyDoubleSingleByte", hkFull ? 1 : 0);
     }
 
-    BOOL showStatus = (IsDlgButtonChecked(pState->hwndPanels[2], IDC_CHK_SHOWSTATUS) == BST_CHECKED);
+    BOOL showStatus = (IsDlgButtonChecked(pState->hwndPanels[1], IDC_CHK_SHOWSTATUS) == BST_CHECKED);
+    BOOL syncOnFocus = (IsDlgButtonChecked(pState->hwndPanels[0], IDC_CHK_SYNC_SETTINGS) == BST_CHECKED);
     CStatusWindow* sw = p->_GetStatusWindow();
     if (sw != nullptr)
     {
         sw->_SetHiddenByUser(!showStatus);
         sw->_Show(showStatus ? TRUE : FALSE);
+    }
+    CCompositionProcessorEngine::SetSyncSettingsOnFocusEnabled(syncOnFocus);
+
+    // 跨进程同步: 写出版本戳; 本进程引擎对齐, 其它进程在获焦时重载 (若开启同步).
+    CCompositionProcessorEngine::BumpSettingsVersionInRegistry();
+    if (eng != nullptr)
+    {
+        eng->AcknowledgeSettingsVersion();
     }
 }
 
@@ -784,7 +918,6 @@ static void _CreateControls(_In_ HWND hWnd, _In_ DlgState* pState)
     if (pState->hwndCatList != nullptr)
     {
         SendMessage(pState->hwndCatList, LB_ADDSTRING, 0, (LPARAM)L"输入模式");
-        SendMessage(pState->hwndCatList, LB_ADDSTRING, 0, (LPARAM)L"候选设置");
         SendMessage(pState->hwndCatList, LB_ADDSTRING, 0, (LPARAM)L"界面");
         SendMessage(pState->hwndCatList, LB_ADDSTRING, 0, (LPARAM)L"快捷键");
         SendMessage(pState->hwndCatList, LB_ADDSTRING, 0, (LPARAM)L"关于");
@@ -794,11 +927,10 @@ static void _CreateControls(_In_ HWND hWnd, _In_ DlgState* pState)
     // Right panels. No system border — they draw their own azure border.
     DWORD panelStyle = WS_CHILD;
     pState->hwndPanels[0] = _CreateCtrl(hWnd, L"STATIC", nullptr, panelStyle | WS_VISIBLE, panelX, listY, panelW, panelH, IDC_PANEL_INPUT, pState->hFont);
-    pState->hwndPanels[1] = _CreateCtrl(hWnd, L"STATIC", nullptr, panelStyle, panelX, listY, panelW, panelH, IDC_PANEL_CAND, pState->hFont);
-    pState->hwndPanels[2] = _CreateCtrl(hWnd, L"STATIC", nullptr, panelStyle, panelX, listY, panelW, panelH, IDC_PANEL_UI, pState->hFont);
-    pState->hwndPanels[3] = _CreateCtrl(hWnd, L"STATIC", nullptr, panelStyle, panelX, listY, panelW, panelH, IDC_PANEL_HOTKEY, pState->hFont);
-    pState->hwndPanels[4] = _CreateCtrl(hWnd, L"STATIC", nullptr, panelStyle, panelX, listY, panelW, panelH, IDC_PANEL_ABOUT, pState->hFont);
-    for (int i = 0; i < 5; ++i)
+    pState->hwndPanels[1] = _CreateCtrl(hWnd, L"STATIC", nullptr, panelStyle, panelX, listY, panelW, panelH, IDC_PANEL_UI, pState->hFont);
+    pState->hwndPanels[2] = _CreateCtrl(hWnd, L"STATIC", nullptr, panelStyle, panelX, listY, panelW, panelH, IDC_PANEL_HOTKEY, pState->hFont);
+    pState->hwndPanels[3] = _CreateCtrl(hWnd, L"STATIC", nullptr, panelStyle, panelX, listY, panelW, panelH, IDC_PANEL_ABOUT, pState->hFont);
+    for (int i = 0; i < 4; ++i)
     {
         if (pState->hwndPanels[i] != nullptr)
         {
@@ -809,34 +941,48 @@ static void _CreateControls(_In_ HWND hWnd, _In_ DlgState* pState)
     // --- Input mode panel ---
     HWND panel = pState->hwndPanels[0];
     int pw = panelW;
+    _CreateCtrl(panel, L"STATIC", L"词库：", WS_CHILD | WS_VISIBLE | SS_LEFT,
+        16, 12, pw - 32, 20, IDC_ST_DICT_LBL, pState->hFont);
+    _CreateCtrl(panel, L"COMBOBOX", nullptr,
+        WS_CHILD | WS_VISIBLE | WS_VSCROLL | CBS_DROPDOWNLIST,
+        16, 34, 200, 200, IDC_CMB_DICT, pState->hFont);
+
     _CreateCtrl(panel, L"BUTTON", L"全角 / 半角", WS_CHILD | WS_VISIBLE | BS_GROUPBOX,
-        12, 12, pw - 24, 96, IDC_GRP_DSB, pState->hFont);
+        12, 72, pw - 24, 96, IDC_GRP_DSB, pState->hFont);
     _CreateCtrl(panel, L"BUTTON", L"半角", WS_CHILD | WS_VISIBLE | WS_TABSTOP | WS_GROUP | BS_AUTORADIOBUTTON,
-        28, 40, 130, 24, IDC_RADIO_HALF, pState->hFont);
+        28, 100, 130, 24, IDC_RADIO_HALF, pState->hFont);
     _CreateCtrl(panel, L"BUTTON", L"全角", WS_CHILD | WS_VISIBLE | BS_AUTORADIOBUTTON,
-        28, 68, 130, 24, IDC_RADIO_FULL, pState->hFont);
+        28, 128, 130, 24, IDC_RADIO_FULL, pState->hFont);
 
     _CreateCtrl(panel, L"BUTTON", L"中 / 英文标点", WS_CHILD | WS_VISIBLE | BS_GROUPBOX,
-        12, 120, pw - 24, 96, IDC_GRP_PUNCT, pState->hFont);
+        12, 180, pw - 24, 96, IDC_GRP_PUNCT, pState->hFont);
     _CreateCtrl(panel, L"BUTTON", L"中文标点", WS_CHILD | WS_VISIBLE | WS_TABSTOP | WS_GROUP | BS_AUTORADIOBUTTON,
-        28, 148, 140, 24, IDC_RADIO_PUNCT_CN, pState->hFont);
+        28, 208, 140, 24, IDC_RADIO_PUNCT_CN, pState->hFont);
     _CreateCtrl(panel, L"BUTTON", L"英文标点", WS_CHILD | WS_VISIBLE | BS_AUTORADIOBUTTON,
-        28, 176, 140, 24, IDC_RADIO_PUNCT_EN, pState->hFont);
+        28, 236, 140, 24, IDC_RADIO_PUNCT_EN, pState->hFont);
 
     _CreateCtrl(panel, L"BUTTON", L"仅输出常用字（GB2312 常用字）", WS_CHILD | WS_VISIBLE | BS_AUTOCHECKBOX,
-        16, 236, pw - 32, 24, IDC_CHK_ONLYCOMMON, pState->hFont);
+        16, 296, pw - 32, 24, IDC_CHK_ONLYCOMMON, pState->hFont);
     _CreateCtrl(panel, L"BUTTON", L"空码时检索全码表", WS_CHILD | WS_VISIBLE | BS_AUTOCHECKBOX,
-        16, 268, pw - 32, 24, IDC_CHK_EMPTY_CODE_FULL, pState->hFont);
+        16, 328, pw - 32, 24, IDC_CHK_EMPTY_CODE_FULL, pState->hFont);
     _CreateCtrl(panel, L"BUTTON", L"数字后 , . 使用英文标点", WS_CHILD | WS_VISIBLE | BS_AUTOCHECKBOX,
-        16, 300, pw - 32, 24, IDC_CHK_DIGIT_EN_PUNCT, pState->hFont);
+        16, 360, pw - 32, 24, IDC_CHK_DIGIT_EN_PUNCT, pState->hFont);
+    _CreateCtrl(panel, L"BUTTON", L"全局同步输入模式", WS_CHILD | WS_VISIBLE | BS_AUTOCHECKBOX,
+        16, 392, pw - 32, 24, IDC_CHK_SYNC_SETTINGS, pState->hFont);
 
-    // --- Candidate panel ---
-    HWND cpanel = pState->hwndPanels[1];
-    _CreateCtrl(cpanel, L"STATIC", L"每页候选字数：", WS_CHILD | WS_VISIBLE | SS_LEFT,
-        16, 20, pw - 32, 24, IDC_ST_PAGECNT_LBL, pState->hFont);
-    HWND hwndCombo = _CreateCtrl(cpanel, L"COMBOBOX", nullptr,
+    // --- Interface panel ---
+    // Labels and combos share a row so the preview keeps more vertical room.
+    HWND upanel = pState->hwndPanels[1];
+    const int uiLabelW = 110;
+    const int uiComboX = 16 + uiLabelW + 8;
+    const int uiComboW = 120;
+    _CreateCtrl(upanel, L"BUTTON", L"显示浮动状态栏", WS_CHILD | WS_VISIBLE | BS_AUTOCHECKBOX,
+        16, 20, pw - 32, 24, IDC_CHK_SHOWSTATUS, pState->hFont);
+    _CreateCtrl(upanel, L"STATIC", L"每页候选字数：", WS_CHILD | WS_VISIBLE | SS_LEFT | SS_CENTERIMAGE,
+        16, 52, uiLabelW, 24, IDC_ST_PAGECNT_LBL, pState->hFont);
+    HWND hwndCombo = _CreateCtrl(upanel, L"COMBOBOX", nullptr,
         WS_CHILD | WS_VISIBLE | WS_VSCROLL | CBS_DROPDOWNLIST,
-        16, 48, 120, 200, IDC_CMB_PAGECNT, pState->hFont);
+        uiComboX, 52, uiComboW, 200, IDC_CMB_PAGECNT, pState->hFont);
     if (hwndCombo != nullptr)
     {
         for (int i = 1; i <= 10; ++i)
@@ -846,15 +992,11 @@ static void _CreateControls(_In_ HWND hWnd, _In_ DlgState* pState)
             SendMessage(hwndCombo, CB_ADDSTRING, 0, (LPARAM)buf);
         }
     }
-
-    // --- Interface panel ---
-    _CreateCtrl(pState->hwndPanels[2], L"BUTTON", L"显示浮动状态栏", WS_CHILD | WS_VISIBLE | BS_AUTOCHECKBOX,
-        16, 20, pw - 32, 24, IDC_CHK_SHOWSTATUS, pState->hFont);
-    _CreateCtrl(pState->hwndPanels[2], L"STATIC", L"候选框字号：", WS_CHILD | WS_VISIBLE | SS_LEFT,
-        16, 56, pw - 32, 24, IDC_ST_FONTSIZE_LBL, pState->hFont);
-    HWND hwndFontCombo = _CreateCtrl(pState->hwndPanels[2], L"COMBOBOX", nullptr,
+    _CreateCtrl(upanel, L"STATIC", L"候选框字号：", WS_CHILD | WS_VISIBLE | SS_LEFT | SS_CENTERIMAGE,
+        16, 84, uiLabelW, 24, IDC_ST_FONTSIZE_LBL, pState->hFont);
+    HWND hwndFontCombo = _CreateCtrl(upanel, L"COMBOBOX", nullptr,
         WS_CHILD | WS_VISIBLE | WS_VSCROLL | CBS_DROPDOWNLIST,
-        16, 84, 120, 220, IDC_CMB_FONTSIZE, pState->hFont);
+        uiComboX, 84, uiComboW, 220, IDC_CMB_FONTSIZE, pState->hFont);
     if (hwndFontCombo != nullptr)
     {
         WCHAR autoLabel[32] = {0};
@@ -868,27 +1010,26 @@ static void _CreateControls(_In_ HWND hWnd, _In_ DlgState* pState)
             SendMessage(hwndFontCombo, CB_ADDSTRING, 0, (LPARAM)buf);
         }
     }
-    _CreateCtrl(pState->hwndPanels[2], L"STATIC", L"预览：", WS_CHILD | WS_VISIBLE | SS_LEFT,
+    _CreateCtrl(upanel, L"STATIC", L"预览：", WS_CHILD | WS_VISIBLE | SS_LEFT,
         16, 120, pw - 32, 24, IDC_ST_PREVIEW_LBL, pState->hFont);
-    pState->hwndPreview = _CreateCtrl(pState->hwndPanels[2], L"STATIC", nullptr,
+    pState->hwndPreview = _CreateCtrl(upanel, L"STATIC", nullptr,
         WS_CHILD | WS_VISIBLE, 16, 148, CAND_WINDOW_WIDTH_PX, 120, IDC_PREVIEW, nullptr);
     if (pState->hwndPreview != nullptr)
     {
         SetWindowLongPtr(pState->hwndPreview, GWLP_USERDATA, (LONG_PTR)pState);
         s_prevPreviewWndProc = (WNDPROC)SetWindowLongPtr(pState->hwndPreview, GWLP_WNDPROC, (LONG_PTR)_PreviewWndProc);
     }
-    _LoadPreviewCandidates(pState);
 
     // --- Hotkey panel ---
-    _CreateCtrl(pState->hwndPanels[3], L"BUTTON",
+    _CreateCtrl(pState->hwndPanels[2], L"BUTTON",
         L"Ctrl+M  切换常用字 / 全码表",
         WS_CHILD | WS_VISIBLE | BS_AUTOCHECKBOX,
         16, 20, pw - 32, 24, IDC_CHK_HOTKEY_ONLYCOMMON, pState->hFont);
-    _CreateCtrl(pState->hwndPanels[3], L"BUTTON",
+    _CreateCtrl(pState->hwndPanels[2], L"BUTTON",
         L"Ctrl+.  切换中 / 英文标点",
         WS_CHILD | WS_VISIBLE | BS_AUTOCHECKBOX,
         16, 52, pw - 32, 24, IDC_CHK_HOTKEY_PUNCTUATION, pState->hFont);
-    _CreateCtrl(pState->hwndPanels[3], L"BUTTON",
+    _CreateCtrl(pState->hwndPanels[2], L"BUTTON",
         L"Shift+空格  切换全 / 半角",
         WS_CHILD | WS_VISIBLE | BS_AUTOCHECKBOX,
         16, 84, pw - 32, 24, IDC_CHK_HOTKEY_FULLHALF, pState->hFont);
@@ -901,13 +1042,12 @@ static void _CreateControls(_In_ HWND hWnd, _In_ DlgState* pState)
         L"迪弥五笔 (DIME)\r\n"
         L"版本 %s\r\n"
         L"Windows TSF 五笔输入法\r\n"
-        L"\r\n"
-        L"源码:\r\n",
+        L"\r\n",
         DIME_VERSION_STRING_W);
-    _CreateCtrl(pState->hwndPanels[4], L"STATIC", aboutText,
+    _CreateCtrl(pState->hwndPanels[3], L"STATIC", aboutText,
         WS_CHILD | WS_VISIBLE | SS_LEFT, 16, 16, pw - 32, 100, IDC_ST_ABOUT, pState->hFont);
 
-    HWND hwndLink = _CreateCtrl(pState->hwndPanels[4], L"STATIC", kRepoUrl,
+    HWND hwndLink = _CreateCtrl(pState->hwndPanels[3], L"STATIC", kRepoUrl,
         WS_CHILD | WS_VISIBLE | WS_TABSTOP | SS_LEFT | SS_NOTIFY,
         16, 116, pw - 32, 24, IDC_ST_ABOUT_LINK, pState->hFont);
     if (hwndLink != nullptr)
@@ -915,7 +1055,7 @@ static void _CreateControls(_In_ HWND hWnd, _In_ DlgState* pState)
         s_prevAboutLinkWndProc = (WNDPROC)SetWindowLongPtr(hwndLink, GWLP_WNDPROC, (LONG_PTR)_AboutLinkWndProc);
     }
 
-    _CreateCtrl(pState->hwndPanels[4], L"STATIC", L"版权所有 © 2026 cnDenis",
+    _CreateCtrl(pState->hwndPanels[3], L"STATIC", L"版权所有 © 2026 cnDenis",
         WS_CHILD | WS_VISIBLE | SS_LEFT, 16, 156, pw - 32, 24, IDC_ST_ABOUT_COPY, pState->hFont);
 
     // --- Bottom-right buttons: 确定 (apply+close) / 取消 (cancel) / 应用 (apply) ---
@@ -1007,6 +1147,12 @@ static LRESULT CALLBACK ConfigDlgProc(_In_ HWND hWnd, UINT uMsg, WPARAM wParam, 
             {
                 int sel = (int)SendMessage(pState->hwndCatList, LB_GETCURSEL, 0, 0);
                 _ShowCategory(pState, sel);
+            }
+            else if (id == IDC_CMB_PAGECNT && code == CBN_SELCHANGE && pState != nullptr)
+            {
+                // Live preview only; persisted on 确定 / 应用.
+                _LoadPreviewCandidates(pState);
+                _UpdatePreviewLayout(pState);
             }
             else if (id == IDC_CMB_FONTSIZE && code == CBN_SELCHANGE && pState != nullptr)
             {
@@ -1100,7 +1246,7 @@ void DimeShowConfigDialog(_In_ HWND hwndOwner, _In_ CDIME* pTextService)
 
     HWND hWnd = CreateWindowEx(WS_EX_TOPMOST, L"DimeConfigDialog", L"迪弥五笔设置",
         WS_OVERLAPPEDWINDOW & ~(WS_MAXIMIZEBOX | WS_MINIMIZEBOX | WS_THICKFRAME),
-        CW_USEDEFAULT, CW_USEDEFAULT, 560, 480,
+        CW_USEDEFAULT, CW_USEDEFAULT, 560, 540,
         nullptr, nullptr, Global::dllInstanceHandle, pState);
     if (hWnd == nullptr)
     {
@@ -1125,4 +1271,27 @@ void DimeShowConfigDialog(_In_ HWND hwndOwner, _In_ CDIME* pTextService)
         TranslateMessage(&msg);
         DispatchMessage(&msg);
     }
+}
+
+//+---------------------------------------------------------------------------
+//
+// DimeLaunchConfigDialog
+//
+//  Exported for dime_config.exe (and other hosts). Creates an unactivated
+//  CDIME and opens the same settings UI as ITfFnConfigure::Show.
+//
+//----------------------------------------------------------------------------
+
+extern "C" HRESULT WINAPI DimeLaunchConfigDialog(HWND hwndParent)
+{
+    ITfFnConfigure* pConfig = nullptr;
+    HRESULT hr = CDIME::CreateInstance(nullptr, IID_ITfFnConfigure, reinterpret_cast<void**>(&pConfig));
+    if (FAILED(hr) || pConfig == nullptr)
+    {
+        return FAILED(hr) ? hr : E_FAIL;
+    }
+
+    hr = pConfig->Show(hwndParent, 0, GUID_NULL);
+    pConfig->Release();
+    return hr;
 }

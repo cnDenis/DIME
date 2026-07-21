@@ -18,17 +18,22 @@ echo === Step 1/4: Build x64 + x86 Release ===
 call "%ROOT%\scripts\build_release.bat"
 if errorlevel 1 exit /b 1
 
-REM 2) Precompile binary dictionaries (.bin) from the text sources so the IME
-REM    loads with zero parsing. The runtime also rebuilds on the fly if a .bin
-REM    is missing, but shipping a fresh .bin is cleaner.
+REM 2) Precompile binary dictionaries (.bin) from every Dictionary\*.txt.
+REM    build_bindict with no args scans the folder (pinyin gets --max-code 24).
 echo.
 echo === Step 2/4: Compile binary dictionaries ===
 if not exist "%BUILD_BIN%" (
     echo [ERROR] build_bindict.exe not found: %BUILD_BIN%
     exit /b 1
 )
-"%BUILD_BIN%" "%ROOT%\Dictionary\wubi98.txt" "%ROOT%\Dictionary\wubi98.bin"
-"%BUILD_BIN%" "%ROOT%\Dictionary\pinyin.txt" "%ROOT%\Dictionary\pinyin.bin" --max-code 24
+pushd "%ROOT%"
+"%BUILD_BIN%"
+set "BIND_RC=!errorlevel!"
+popd
+if not "!BIND_RC!"=="0" (
+    echo [ERROR] build_bindict failed, code !BIND_RC!
+    exit /b 1
+)
 
 REM 3) Assemble the dist layout (flat: both DLLs + shared dict\)
 echo.
@@ -46,16 +51,29 @@ call :copy1 "%ROOT%\out\x64\Release\dime.dll" "%DIST%\dime64.dll"
 if errorlevel 1 exit /b 1
 call :copy1 "%ROOT%\out\x86\Release\dime.dll" "%DIST%\dime32.dll"
 if errorlevel 1 exit /b 1
-call :copy1 "%ROOT%\Dictionary\wubi98.txt"    "%DIST%\dict\wubi98.txt"
-if errorlevel 1 exit /b 1
-call :copy1 "%ROOT%\Dictionary\pinyin.txt"    "%DIST%\dict\pinyin.txt"
-if errorlevel 1 exit /b 1
-call :copy1 "%ROOT%\Dictionary\wubi98.bin"    "%DIST%\dict\wubi98.bin"
-if errorlevel 1 exit /b 1
-call :copy1 "%ROOT%\Dictionary\pinyin.bin"    "%DIST%\dict\pinyin.bin"
-if errorlevel 1 exit /b 1
+
+set "DICT_COUNT=0"
+for %%F in ("%ROOT%\Dictionary\*.txt") do (
+    call :copy1 "%%F" "%DIST%\dict\%%~nxF"
+    if errorlevel 1 exit /b 1
+    set /a DICT_COUNT+=1
+    if exist "%%~dpnF.bin" (
+        call :copy1 "%%~dpnF.bin" "%DIST%\dict\%%~nF.bin"
+        if errorlevel 1 exit /b 1
+    ) else (
+        echo [WARN] no .bin for %%~nxF ^(skipped by converter?^)
+    )
+)
+if !DICT_COUNT! equ 0 (
+    echo [ERROR] no .txt dictionaries found in "%ROOT%\Dictionary"
+    exit /b 1
+)
+echo   packed !DICT_COUNT! dictionary txt^(+bin^)
+
 REM build_bindict.exe ships next to the DLLs (same dir), where the runtime probes it first.
 call :copy1 "%ROOT%\out\x64\Release\build_bindict.exe" "%DIST%\build_bindict.exe"
+if errorlevel 1 exit /b 1
+call :copy1 "%ROOT%\out\x64\Release\dime_config.exe" "%DIST%\dime_config.exe"
 if errorlevel 1 exit /b 1
 echo   dist -> %DIST%
 
