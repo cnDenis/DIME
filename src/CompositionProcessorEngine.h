@@ -126,6 +126,14 @@ public:
     void AcknowledgeSettingsVersion();
     void ApplySettingsFromRegistryIfNeeded();
 
+    // 码表内容热更新: build_bindict 替换 .bin 后 bump DictionaryVersion;
+    // 获焦时对比并 unload/reload (不依赖 SyncSettingsOnFocus).
+    static ULONGLONG ReadDictionaryVersionFromRegistry();
+    static ULONGLONG BumpDictionaryVersionInRegistry();
+    void AcknowledgeDictionaryVersion();
+    void ReloadDictionariesIfVersionChanged();
+    static void TryCleanupStaleBinOldFiles(_In_z_ LPCWSTR dictDir);
+
     // Temporary pinyin mode: reverse-lookup the wubi code for a candidate word
     // so it can be displayed on the right side of each candidate.
     BOOL GetWubiCodeForWord(_In_ const CStringRange *pWord, _Inout_ CStringRange *pCode);
@@ -223,7 +231,7 @@ private:
     BOOL _LoadMainDictionaryFromStem(_In_z_ LPCWSTR stem, _In_ LPCWSTR pwszDir, size_t dirLen);
     static BOOL _IsValidDictionaryStem(_In_z_ LPCWSTR name);
     static BOOL _ReplaceExtensionWithBin(_Inout_ WCHAR* pwszPath);
-    BOOL _TryLoadBinary(_In_ LPCWSTR pwszBinPath, _In_ LPCWSTR pwszTxtPath, _Out_ CFileMapping** ppFile, _Out_ CTableDictionaryEngine** ppEngine);
+    BOOL _TryLoadBinary(_In_ LPCWSTR pwszBinPath, _Out_ CFileMapping** ppFile, _Out_ CTableDictionaryEngine** ppEngine);
     void _GetPinyinCandidateList(_Inout_ CDIMEArray<CCandidateListItem> *pCandidateList, BOOL loadAllCandidates);
 
 private:
@@ -319,6 +327,7 @@ private:
     int  _candidatePageSize;   // candidates selectable per page (1-10)
     int  _candidateFontSize;   // 0 = auto (DPI tiers), else fixed px
     ULONGLONG _settingsVersion; // 与注册表 SettingsVersion 对齐的本地副本
+    ULONGLONG _dictionaryVersion; // 与注册表 DictionaryVersion 对齐的本地副本
 
     BOOL _imeModeSnapshotValid;
     BOOL _imeModeSnapshotFullWidth;

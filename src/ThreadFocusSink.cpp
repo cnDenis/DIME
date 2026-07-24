@@ -37,6 +37,7 @@ STDAPI CDIME::OnSetThreadFocus()
     if (_pCompositionProcessorEngine)
     {
         _pCompositionProcessorEngine->ApplySettingsFromRegistryIfNeeded();
+        _pCompositionProcessorEngine->ReloadDictionariesIfVersionChanged();
     }
     if (_pStatusWindow)
     {

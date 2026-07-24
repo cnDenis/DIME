@@ -85,7 +85,7 @@ BOOL ReadConfigFromFileImpl(_In_z_ LPCWSTR binPath, _Out_ DictConfig& out)
         return FALSE;
     }
 
-    HANDLE hFile = CreateFileW(binPath, GENERIC_READ, FILE_SHARE_READ, nullptr,
+    HANDLE hFile = CreateFileW(binPath, GENERIC_READ, FILE_SHARE_READ | FILE_SHARE_DELETE, nullptr,
                                OPEN_EXISTING, FILE_ATTRIBUTE_NORMAL, nullptr);
     if (hFile == INVALID_HANDLE_VALUE)
     {

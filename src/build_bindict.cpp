@@ -8,6 +8,10 @@
 //   build_bindict.exe <in.txt> <out.bin> [--max-code N] [--verify]
 //   build_bindict.exe                      (no args: compile every Dictionary\*.txt)
 //
+// Output is written to <out.bin>.tmp then published atomically (rename aside
+// any existing .bin, move tmp into place) and bumps HKCU\Software\DIME\
+// DictionaryVersion so running IME instances can hot-reload on focus.
+//
 // In no-argument mode the tool scans the source dictionary folder (Dictionary)
 // for all *.txt files and writes a sibling <name>.bin next to each (pinyin
 // dictionaries get --max-code 24 automatically).
@@ -323,6 +327,101 @@ bool VerifyBin(const wchar_t* path,
     CloseHandle(map);
     CloseHandle(h);
     return good;
+}
+
+// Bump HKCU\Software\DIME\DictionaryVersion so running IME instances reload.
+static void BumpDictionaryVersion()
+{
+    FILETIME ft = {};
+    GetSystemTimeAsFileTime(&ft);
+    ULONGLONG ver = (static_cast<ULONGLONG>(ft.dwHighDateTime) << 32) |
+        static_cast<ULONGLONG>(ft.dwLowDateTime);
+
+    HKEY hKey = nullptr;
+    if (RegCreateKeyExW(HKEY_CURRENT_USER, L"Software\\DIME", 0, nullptr,
+                        REG_OPTION_NON_VOLATILE, KEY_READ | KEY_WRITE, nullptr,
+                        &hKey, nullptr) != ERROR_SUCCESS)
+    {
+        fwprintf(stderr, L"[WARN] cannot open HKCU\\Software\\DIME to bump DictionaryVersion\n");
+        return;
+    }
+
+    ULONGLONG prev = 0;
+    DWORD type = 0;
+    DWORD cb = sizeof(prev);
+    if (RegQueryValueExW(hKey, L"DictionaryVersion", nullptr, &type,
+                         reinterpret_cast<LPBYTE>(&prev), &cb) == ERROR_SUCCESS &&
+        type == REG_QWORD && cb == sizeof(prev))
+    {
+        if (ver <= prev)
+        {
+            ver = prev + 1;
+        }
+    }
+
+    if (RegSetValueExW(hKey, L"DictionaryVersion", 0, REG_QWORD,
+                       reinterpret_cast<const BYTE*>(&ver), sizeof(ver)) != ERROR_SUCCESS)
+    {
+        fwprintf(stderr, L"[WARN] failed to write DictionaryVersion\n");
+    }
+    else
+    {
+        wprintf(L"[OK] DictionaryVersion -> %llu\n", static_cast<unsigned long long>(ver));
+    }
+    RegCloseKey(hKey);
+}
+
+// Atomically publish tmpPath as outPath:
+//   best-effort delete outPath.old -> rename outPath to .old (or delete-pending)
+//   -> rename tmp to outPath -> bump DictionaryVersion -> try delete .old
+static bool PublishBinAtomically(const wchar_t* tmpPath, const wchar_t* outPath)
+{
+    wchar_t oldPath[MAX_PATH] = {};
+    if (wcslen(outPath) + 4 >= MAX_PATH) // ".old"
+    {
+        fwprintf(stderr, L"[ERROR] path too long for .old: %s\n", outPath);
+        return false;
+    }
+    wcscpy_s(oldPath, ARRAYSIZE(oldPath), outPath);
+    wcscat_s(oldPath, ARRAYSIZE(oldPath), L".old");
+
+    DeleteFileW(oldPath); // 清残留; 仍被 map 则失败, 忽略.
+
+    if (GetFileAttributesW(outPath) != INVALID_FILE_ATTRIBUTES)
+    {
+        if (!MoveFileExW(outPath, oldPath, MOVEFILE_REPLACE_EXISTING))
+        {
+            // .old 可能仍被占用: 对当前 .bin 做 delete-pending (需读者 FILE_SHARE_DELETE).
+            if (!DeleteFileW(outPath))
+            {
+                wchar_t orphan[MAX_PATH] = {};
+                if (swprintf_s(orphan, ARRAYSIZE(orphan), L"%s.old.%lu",
+                               outPath, GetTickCount()) < 0)
+                {
+                    fwprintf(stderr, L"[ERROR] cannot retire existing bin: %s (err %lu)\n",
+                             outPath, GetLastError());
+                    return false;
+                }
+                if (!MoveFileW(outPath, orphan))
+                {
+                    fwprintf(stderr, L"[ERROR] cannot rename existing bin aside: %s (err %lu)\n",
+                             outPath, GetLastError());
+                    return false;
+                }
+            }
+        }
+    }
+
+    if (!MoveFileExW(tmpPath, outPath, 0))
+    {
+        fwprintf(stderr, L"[ERROR] cannot publish %s -> %s (err %lu)\n",
+                 tmpPath, outPath, GetLastError());
+        return false;
+    }
+
+    BumpDictionaryVersion();
+    DeleteFileW(oldPath); // 无人占用时可立刻清掉.
+    return true;
 }
 
 } // namespace
@@ -682,12 +781,21 @@ int wmain(int argc, wchar_t** argv)
     hdr.stringPoolOffset = stringPoolOffset;
     hdr.sourceMtimeHigh = srcMtime.dwHighDateTime;
 
-    // ---- Write output ----
-    HANDLE out = CreateFileW(outPath, GENERIC_WRITE, 0, nullptr,
+    // ---- Write output to .tmp, then atomically publish as outPath ----
+    wchar_t tmpPath[MAX_PATH] = {};
+    if (wcslen(outPath) + 4 >= MAX_PATH)
+    {
+        fwprintf(stderr, L"[ERROR] path too long for .tmp: %s\n", outPath);
+        return 1;
+    }
+    wcscpy_s(tmpPath, ARRAYSIZE(tmpPath), outPath);
+    wcscat_s(tmpPath, ARRAYSIZE(tmpPath), L".tmp");
+
+    HANDLE out = CreateFileW(tmpPath, GENERIC_WRITE, 0, nullptr,
                              CREATE_ALWAYS, FILE_ATTRIBUTE_NORMAL, nullptr);
     if (out == INVALID_HANDLE_VALUE)
     {
-        fwprintf(stderr, L"[ERROR] cannot create output: %s (err %lu)\n", outPath, GetLastError());
+        fwprintf(stderr, L"[ERROR] cannot create output: %s (err %lu)\n", tmpPath, GetLastError());
         return 1;
     }
 
@@ -733,13 +841,13 @@ int wmain(int argc, wchar_t** argv)
 
     if (!ok)
     {
-        fwprintf(stderr, L"[ERROR] write failed for %s (err %lu)\n", outPath, GetLastError());
-        DeleteFileW(outPath);
+        fwprintf(stderr, L"[ERROR] write failed for %s (err %lu)\n", tmpPath, GetLastError());
+        DeleteFileW(tmpPath);
         return 1;
     }
 
     const uint64_t totalBytes = static_cast<uint64_t>(stringPoolOffset) + pool.size();
-    wprintf(L"[OK] %s -> %s\n", inPath, outPath);
+    wprintf(L"[OK] %s -> %s (via .tmp)\n", inPath, outPath);
     wprintf(L"     lines=%u skipped=%u codes=%u wordPairs=%u reverse=%u\n",
             lineCount, skipped, codeCount, wordPairCount, reverseCount);
     wprintf(L"     commonChars(GB2312)=%u poolBytes=%zu totalBytes=%llu\n",
@@ -747,15 +855,22 @@ int wmain(int argc, wchar_t** argv)
 
     if (verify)
     {
-        if (VerifyBin(outPath, codeToWords, wordToCode))
+        if (VerifyBin(tmpPath, codeToWords, wordToCode))
         {
             wprintf(L"[VERIFY] PASS: .bin round-trips identically to the text dictionary\n");
         }
         else
         {
             fwprintf(stderr, L"[VERIFY] FAIL\n");
+            DeleteFileW(tmpPath);
             return 3;
         }
+    }
+
+    if (!PublishBinAtomically(tmpPath, outPath))
+    {
+        DeleteFileW(tmpPath);
+        return 1;
     }
     return 0;
 }

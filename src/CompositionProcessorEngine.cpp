@@ -152,6 +152,7 @@ CCompositionProcessorEngine::CCompositionProcessorEngine()
     _candidatePageSize = 10;
     _candidateFontSize = 0;
     _settingsVersion = 0;
+    _dictionaryVersion = 0;
 
     _imeModeSnapshotValid = FALSE;
     _imeModeSnapshotFullWidth = FALSE;
@@ -296,6 +297,14 @@ BOOL CCompositionProcessorEngine::SetupLanguageProfile(LANGID langid, REFGUID gu
     SetupConfiguration();
     SetupDictionaryFile();
     AcknowledgeSettingsVersion();
+    AcknowledgeDictionaryVersion();
+    {
+        WCHAR dictDir[MAX_PATH] = {L'\0'};
+        if (ResolveDictionaryDirectory(dictDir, ARRAYSIZE(dictDir)))
+        {
+            TryCleanupStaleBinOldFiles(dictDir);
+        }
+    }
 
 Exit:
     return ret;
@@ -1792,6 +1801,170 @@ void CCompositionProcessorEngine::AcknowledgeSettingsVersion()
     _settingsVersion = ReadSettingsVersionFromRegistry();
 }
 
+ULONGLONG CCompositionProcessorEngine::ReadDictionaryVersionFromRegistry()
+{
+    CRegKey reg;
+    if (reg.Open(HKEY_CURRENT_USER, L"Software\\DIME") != ERROR_SUCCESS)
+    {
+        return 0;
+    }
+    ULONGLONG ver = 0;
+    if (reg.QueryQWORDValue(L"DictionaryVersion", ver) != ERROR_SUCCESS)
+    {
+        return 0;
+    }
+    return ver;
+}
+
+ULONGLONG CCompositionProcessorEngine::BumpDictionaryVersionInRegistry()
+{
+    FILETIME ft = {};
+    GetSystemTimeAsFileTime(&ft);
+    ULONGLONG ver = (static_cast<ULONGLONG>(ft.dwHighDateTime) << 32) |
+        static_cast<ULONGLONG>(ft.dwLowDateTime);
+
+    ULONGLONG prev = ReadDictionaryVersionFromRegistry();
+    if (ver <= prev)
+    {
+        ver = prev + 1;
+    }
+
+    CRegKey reg;
+    if (reg.Create(HKEY_CURRENT_USER, L"Software\\DIME") == ERROR_SUCCESS)
+    {
+        reg.SetQWORDValue(L"DictionaryVersion", ver);
+    }
+    DIME_DEBUG_LOG(L"BumpDictionaryVersion -> %llu", ver);
+    return ver;
+}
+
+void CCompositionProcessorEngine::AcknowledgeDictionaryVersion()
+{
+    _dictionaryVersion = ReadDictionaryVersionFromRegistry();
+}
+
+void CCompositionProcessorEngine::TryCleanupStaleBinOldFiles(_In_z_ LPCWSTR dictDir)
+{
+    if (!dictDir || dictDir[0] == L'\0')
+    {
+        return;
+    }
+
+    WCHAR search[MAX_PATH] = {L'\0'};
+    if (FAILED(StringCchCopy(search, ARRAYSIZE(search), dictDir)) ||
+        FAILED(StringCchCat(search, ARRAYSIZE(search), L"*.bin.old*")))
+    {
+        return;
+    }
+
+    WIN32_FIND_DATAW fd = {};
+    HANDLE hFind = FindFirstFileW(search, &fd);
+    if (hFind == INVALID_HANDLE_VALUE)
+    {
+        return;
+    }
+
+    do
+    {
+        if (fd.dwFileAttributes & FILE_ATTRIBUTE_DIRECTORY)
+        {
+            continue;
+        }
+        WCHAR path[MAX_PATH] = {L'\0'};
+        if (SUCCEEDED(StringCchCopy(path, ARRAYSIZE(path), dictDir)) &&
+            SUCCEEDED(StringCchCat(path, ARRAYSIZE(path), fd.cFileName)))
+        {
+            DeleteFileW(path); // 仍被 map 时失败, 忽略.
+        }
+    } while (FindNextFileW(hFind, &fd));
+    FindClose(hFind);
+}
+
+void CCompositionProcessorEngine::ReloadDictionariesIfVersionChanged()
+{
+    ULONGLONG remote = ReadDictionaryVersionFromRegistry();
+    if (remote == _dictionaryVersion)
+    {
+        return;
+    }
+
+    DIME_INFO_LOG(L"ReloadDictionariesIfVersionChanged local=%llu remote=%llu",
+        _dictionaryVersion, remote);
+
+    if (_pTextService)
+    {
+        _pTextService->_ResetInputForModeChange();
+    }
+
+    WCHAR dictDir[MAX_PATH] = {L'\0'};
+    if (!ResolveDictionaryDirectory(dictDir, ARRAYSIZE(dictDir)))
+    {
+        DIME_ERROR_LOG(L"ReloadDictionariesIfVersionChanged: cannot resolve dict directory");
+        // 仍对齐版本, 避免获焦时反复失败刷日志; 下次 bump 会再试.
+        AcknowledgeDictionaryVersion();
+        return;
+    }
+    size_t dictDirLen = wcslen(dictDir);
+
+    WCHAR stem[64] = {L'\0'};
+    StringCchCopy(stem, ARRAYSIZE(stem), _mainDictionaryName);
+
+    _UnloadMainDictionary();
+    if (!_LoadMainDictionaryFromStem(stem, dictDir, dictDirLen))
+    {
+        DIME_WARNING_LOG(L"ReloadDictionaries: load %s failed, fallback %s", stem, TEXTSERVICE_DIC_STEM);
+        if (_wcsicmp(stem, TEXTSERVICE_DIC_STEM) != 0 &&
+            _LoadMainDictionaryFromStem(TEXTSERVICE_DIC_STEM, dictDir, dictDirLen))
+        {
+            StringCchCopy(_mainDictionaryName, ARRAYSIZE(_mainDictionaryName), TEXTSERVICE_DIC_STEM);
+            WriteDictionaryNameToRegistry(TEXTSERVICE_DIC_STEM);
+        }
+        else
+        {
+            DIME_ERROR_LOG(L"ReloadDictionaries: main dictionary reload FAILED");
+        }
+    }
+    else
+    {
+        StringCchCopy(_mainDictionaryName, ARRAYSIZE(_mainDictionaryName), stem);
+    }
+
+    if (_pPinyinDictionaryEngine)
+    {
+        delete _pPinyinDictionaryEngine;
+        _pPinyinDictionaryEngine = nullptr;
+    }
+    if (_pPinyinDictionaryFile)
+    {
+        delete _pPinyinDictionaryFile;
+        _pPinyinDictionaryFile = nullptr;
+    }
+    if (!_LoadDictionary(TEXTSERVICE_PINYIN_DIC, dictDir, dictDirLen,
+                         &_pPinyinDictionaryFile, &_pPinyinDictionaryEngine))
+    {
+        DIME_WARNING_LOG(L"ReloadDictionaries: pinyin dictionary not loaded (optional)");
+    }
+
+    if (_pTableDictionaryEngine)
+    {
+        _pTableDictionaryEngine->SetOnlyCommon(_isOnlyCommon);
+        _pTableDictionaryEngine->SetEmptyCodeSearchFull(_emptyCodeSearchFull);
+    }
+    if (_pPinyinDictionaryEngine)
+    {
+        _pPinyinDictionaryEngine->SetOnlyCommon(_isOnlyCommon);
+        _pPinyinDictionaryEngine->SetEmptyCodeSearchFull(_emptyCodeSearchFull);
+    }
+
+    TryCleanupStaleBinOldFiles(dictDir);
+    AcknowledgeDictionaryVersion();
+
+    if (_pTextService)
+    {
+        _pTextService->_RefreshStatusWindow();
+    }
+}
+
 void CCompositionProcessorEngine::ApplySettingsFromRegistryIfNeeded()
 {
     if (!IsSyncSettingsOnFocusEnabled())
@@ -2170,6 +2343,8 @@ BOOL CCompositionProcessorEngine::SetMainDictionaryName(_In_z_ LPCWSTR name)
         _pTableDictionaryEngine->SetEmptyCodeSearchFull(_emptyCodeSearchFull);
     }
 
+    TryCleanupStaleBinOldFiles(dictDir);
+
     if (_pTextService)
     {
         _pTextService->_ResetInputForModeChange();
@@ -2397,16 +2572,13 @@ BOOL CCompositionProcessorEngine::_LoadDictionary(_In_ LPCWSTR pwszDicName, _In_
     StringCchCopyN(pwszPath, bufLen, pwszDir, dirLen);
     StringCchCatN(pwszPath, bufLen, pwszDicName, nameLen);
 
-    // --- Prefer the precompiled binary dictionary (.bin) when present and valid.
-    // It is zero-parse at load and zero-copy at lookup. A .bin alone is
-    // sufficient; the text .txt is optional and only opened if it coexists. ---
+    // Prefer the precompiled binary dictionary (.bin): zero-parse load,
+    // zero-copy lookup. Runtime never opens the companion .txt.
     WCHAR binPath[MAX_PATH] = {L'\0'};
     BOOL canBin = SUCCEEDED(StringCchCopyW(binPath, ARRAYSIZE(binPath), pwszPath)) &&
                   _ReplaceExtensionWithBin(binPath);
 
-    // Prefer the precompiled binary dictionary (.bin): zero-parse load,
-    // zero-copy lookup. If present and valid, use it directly.
-    if (canBin && _TryLoadBinary(binPath, pwszPath, ppFile, ppEngine))
+    if (canBin && _TryLoadBinary(binPath, ppFile, ppEngine))
     {
         delete [] pwszPath;
         return TRUE;
@@ -2419,7 +2591,7 @@ BOOL CCompositionProcessorEngine::_LoadDictionary(_In_ LPCWSTR pwszDicName, _In_
     if (canBin && GetFileAttributes(pwszPath) != INVALID_FILE_ATTRIBUTES)
     {
         if (_RunConverter(pwszPath, binPath) &&
-            _TryLoadBinary(binPath, pwszPath, ppFile, ppEngine))
+            _TryLoadBinary(binPath, ppFile, ppEngine))
         {
             delete [] pwszPath;
             return TRUE;
@@ -2455,10 +2627,9 @@ BOOL CCompositionProcessorEngine::_ReplaceExtensionWithBin(_Inout_ WCHAR* pwszPa
 }
 
 // Opens <pwszBinPath> as a binary dictionary and, if valid, constructs the
-// engine. The text <pwszTxtPath> is opened only when it coexists (its ownership
-// is returned via *ppFile so the composition engine frees it at teardown).
-// On success sets *ppFile/*ppEngine and returns TRUE.
-BOOL CCompositionProcessorEngine::_TryLoadBinary(_In_ LPCWSTR pwszBinPath, _In_ LPCWSTR pwszTxtPath,
+// engine. Does not open any companion .txt. On success *ppFile is nullptr
+// (text mapping unused) and *ppEngine owns the binary reader.
+BOOL CCompositionProcessorEngine::_TryLoadBinary(_In_ LPCWSTR pwszBinPath,
                                                  _Out_ CFileMapping** ppFile, _Out_ CTableDictionaryEngine** ppEngine)
 {
     *ppFile = nullptr;
@@ -2470,7 +2641,9 @@ BOOL CCompositionProcessorEngine::_TryLoadBinary(_In_ LPCWSTR pwszBinPath, _In_ 
         return FALSE;
     }
     pBinFile->SetRawMode(TRUE);
-    if (!pBinFile->CreateFile(pwszBinPath, GENERIC_READ, OPEN_EXISTING, FILE_SHARE_READ))
+    // FILE_SHARE_DELETE: 允许 updater 在 IME 仍 map 时 rename/删除旧 .bin (方案 2).
+    if (!pBinFile->CreateFile(pwszBinPath, GENERIC_READ, OPEN_EXISTING,
+                              FILE_SHARE_READ | FILE_SHARE_DELETE))
     {
         delete pBinFile;
         return FALSE;
@@ -2489,26 +2662,16 @@ BOOL CCompositionProcessorEngine::_TryLoadBinary(_In_ LPCWSTR pwszBinPath, _In_ 
     }
     // pBinFile is now owned by pBin.
 
-    // Text dictionary is optional at runtime; open it only if it coexists.
-    // Ownership is returned to the caller (engine _pDictionaryFile member).
-    CFileMapping* pFile = new (std::nothrow) CFileMapping();
-    if (pFile && !pFile->CreateFile(pwszTxtPath, GENERIC_READ, OPEN_EXISTING, FILE_SHARE_READ))
-    {
-        delete pFile;
-        pFile = nullptr;
-    }
-
-    CTableDictionaryEngine* pEngine = new (std::nothrow) CTableDictionaryEngine(GetLocale(), pFile, pBin);
+    CTableDictionaryEngine* pEngine = new (std::nothrow) CTableDictionaryEngine(GetLocale(), nullptr, pBin);
     if (!pEngine)
     {
-        delete pFile;      // pEngine never constructed -> free manually
         delete pBin;       // dtor deletes pBinFile
         return FALSE;
     }
     pEngine->SetOnlyCommon(_GetCompartmentOnlyCommon());
     pEngine->SetEmptyCodeSearchFull(_emptyCodeSearchFull);
 
-    *ppFile = pFile;       // may be nullptr when only .bin ships
+    *ppFile = nullptr;
     *ppEngine = pEngine;   // owns pBin -> pBinFile
     return TRUE;
 }
