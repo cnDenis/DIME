@@ -22,6 +22,14 @@
 #define WUBI_WILDCARD_CHAR      L'Z'
 #define WUBI_INITIAL_CANDIDATE_PAGES  5
 
+// 码表命令词前缀 (结果串以 CMD: 开头时由引擎展开或拦截).
+#define DIME_CMD_PREFIX         L"CMD:"
+#define DIME_CMD_DATE           L"CMD:DATE"
+#define DIME_CMD_TIME           L"CMD:TIME"
+#define DIME_CMD_NOW            L"CMD:NOW"
+#define DIME_CMD_WEEK           L"CMD:WEEK"
+#define DIME_CMD_ENG            L"CMD:ENG"
+
 #define IME_MODE_ON_ICON_INDEX      IDI_IME_MODE_ON
 #define IME_MODE_OFF_ICON_INDEX     IDI_IME_MODE_OFF
 #define IME_DOUBLE_ON_INDEX         IDI_DOUBLE_SINGLE_BYTE_ON

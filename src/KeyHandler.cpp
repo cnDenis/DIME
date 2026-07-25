@@ -117,6 +117,53 @@ HRESULT CDIME::_HandleCancel(TfEditCookie ec, _In_ ITfContext *pContext)
 
 //+---------------------------------------------------------------------------
 //
+// _TryApplyCmdEng
+//
+// CMD:ENG: 进入临时英文, 保留当前编码缓冲区, 不上屏命令串.
+//
+//----------------------------------------------------------------------------
+
+BOOL CDIME::_TryApplyCmdEng(_In_ const CStringRange *pCandidate, TfEditCookie ec, _In_ ITfContext *pContext)
+{
+    if (!pCandidate || !_pCompositionProcessorEngine)
+    {
+        return FALSE;
+    }
+    if (!CCompositionProcessorEngine::IsCmdEngCandidate(pCandidate))
+    {
+        return FALSE;
+    }
+
+    _pCompositionProcessorEngine->SetEnglishInput(TRUE);
+    DIME_DEBUG_LOG(L"english mode ON (CMD:ENG), keep keyLen=%llu",
+        _pCompositionProcessorEngine->GetVirtualKeyLength());
+
+    CStringRange keystroke;
+    DWORD_PTR len = _pCompositionProcessorEngine->GetVirtualKeyLength();
+    if (len > 0 && _pCompositionProcessorEngine->GetKeystrokeBuffer())
+    {
+        keystroke.Set(_pCompositionProcessorEngine->GetKeystrokeBuffer()->Get(), len);
+    }
+    else
+    {
+        keystroke.Set(L"", 0);
+    }
+
+    if (!_pCandidateListUIPresenter)
+    {
+        _CreateAndStartCandidate(_pCompositionProcessorEngine, ec, pContext);
+    }
+    if (_pCandidateListUIPresenter)
+    {
+        _pCandidateListUIPresenter->_UpdateEditCookie(ec);
+        _pCandidateListUIPresenter->_RefreshCandidateContent(&keystroke, nullptr);
+    }
+
+    return TRUE;
+}
+
+//+---------------------------------------------------------------------------
+//
 // _HandleCompositionInput
 //
 // If the keystroke happens within a composition, eat the key and return S_OK.
@@ -369,6 +416,10 @@ HRESULT CDIME::_HandleCompositionInputWorker(_In_ CCompositionProcessorEngine *p
                 (int)keyLen,
                 pCompositionProcessorEngine->GetKeystrokeBuffer()->Get(),
                 pLI->_ItemString.GetLength());
+            if (_TryApplyCmdEng(&pLI->_ItemString, ec, pContext))
+            {
+                return S_OK;
+            }
             hr = _AddCharAndFinalize(ec, pContext, &pLI->_ItemString);
             if (SUCCEEDED(hr))
             {
@@ -622,6 +673,10 @@ HRESULT CDIME::_HandleCompositionFinalize(TfEditCookie ec, _In_ ITfContext *pCon
 
         if (candidateLen)
         {
+            if (_TryApplyCmdEng(&candidateString, ec, pContext))
+            {
+                return S_OK;
+            }
             hr = _AddCharAndFinalize(ec, pContext, &candidateString);
             if (FAILED(hr))
             {
@@ -802,10 +857,10 @@ HRESULT CDIME::_HandleCompositionBackspace(TfEditCookie ec, _In_ ITfContext *pCo
         {
             _HandleCompositionInputWorker(pCompositionProcessorEngine, ec, pContext);
         }
-        else if (pCompositionProcessorEngine->IsEnglishInput())
+        else if (pCompositionProcessorEngine->IsEnglishInput() ||
+                 pCompositionProcessorEngine->IsPinyinInput())
         {
-            // Buffer just became empty but keep the temporary English mode
-            // alive; a further Backspace (while still empty) cancels it.
+            // 缓冲刚清空: 保留临时英文/拼音态, 再按一次退格才退出.
             if (!_pCandidateListUIPresenter)
             {
                 _CreateAndStartCandidate(pCompositionProcessorEngine, ec, pContext);
@@ -827,6 +882,12 @@ HRESULT CDIME::_HandleCompositionBackspace(TfEditCookie ec, _In_ ITfContext *pCo
         // Buffer is already empty: a further Backspace cancels the temporary
         // English mode.
         pCompositionProcessorEngine->SetEnglishInput(FALSE);
+        _HandleCancel(ec, pContext);
+    }
+    else if (pCompositionProcessorEngine->IsPinyinInput())
+    {
+        // 无编码时退格: 退出临时拼音.
+        pCompositionProcessorEngine->SetPinyinInput(FALSE);
         _HandleCancel(ec, pContext);
     }
 

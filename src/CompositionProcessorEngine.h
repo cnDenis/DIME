@@ -148,6 +148,10 @@ public:
     BOOL IsEnglishInput() { return _isEnglishInput; }
     void SetEnglishInput(BOOL v) { _isEnglishInput = v; }
 
+    // 码表 CMD:* 命令: 结果串是否为指定命令 (精确匹配).
+    static BOOL IsCmdCandidate(_In_ const CStringRange *pItem, _In_z_ LPCWSTR cmdLiteral);
+    static BOOL IsCmdEngCandidate(_In_ const CStringRange *pItem);
+
     // "Only common characters" filter (GB2312 level >= 1 single chars only).
     BOOL IsOnlyCommon() { return _isOnlyCommon; }
 
@@ -233,6 +237,17 @@ private:
     static BOOL _ReplaceExtensionWithBin(_Inout_ WCHAR* pwszPath);
     BOOL _TryLoadBinary(_In_ LPCWSTR pwszBinPath, _Out_ CFileMapping** ppFile, _Out_ CTableDictionaryEngine** ppEngine);
     void _GetPinyinCandidateList(_Inout_ CDIMEArray<CCandidateListItem> *pCandidateList, BOOL loadAllCandidates);
+    BOOL _IsKeystrokeBufferPureDigits() const;
+    void _AppendPinyinDigitFormCandidates(_Inout_ CDIMEArray<CCandidateListItem> *pCandidateList);
+
+    // 将 CMD:DATE/TIME/NOW/WEEK 展开为具体字符串; CMD:ENG 保留原样供上屏拦截.
+    void _ExpandCmdCandidates(_Inout_ CDIMEArray<CCandidateListItem> *pCandidateList);
+    BOOL _StoreCmdCandidateString(_In_z_ LPCWSTR text, _Out_ CStringRange *pOut);
+    void _AppendCmdDateCandidates(_Inout_ CDIMEArray<CCandidateListItem> *pOut, const SYSTEMTIME& st);
+    void _AppendCmdTimeCandidates(_Inout_ CDIMEArray<CCandidateListItem> *pOut, const SYSTEMTIME& st);
+    void _AppendCmdNowCandidates(_Inout_ CDIMEArray<CCandidateListItem> *pOut, const SYSTEMTIME& st);
+    void _AppendCmdWeekCandidates(_Inout_ CDIMEArray<CCandidateListItem> *pOut, const SYSTEMTIME& st);
+    BOOL _AppendStoredCandidate(_Inout_ CDIMEArray<CCandidateListItem> *pOut, _In_z_ LPCWSTR text);
 
 private:
     struct _KEYSTROKE
@@ -335,6 +350,12 @@ private:
 
     CFileMapping* _pDictionaryFile;
     CFileMapping* _pPinyinDictionaryFile;
+
+    // CMD 展开字符串暂存 (候选窗 _AddString 会拷走; 下次 Expand 时覆盖).
+    static const UINT _kCmdStorageMax = 40;
+    static const UINT _kCmdStorageCch = 128;
+    WCHAR _cmdStorage[_kCmdStorageMax][_kCmdStorageCch];
+    UINT _cmdStorageUsed;
 
     CDIME* _pTextService;
 

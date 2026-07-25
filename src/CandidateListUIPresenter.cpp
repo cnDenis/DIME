@@ -84,6 +84,10 @@ HRESULT CDIME::_HandleCandidateFinalize(TfEditCookie ec, _In_ ITfContext *pConte
 
     if (candidateLen)
     {
+        if (_TryApplyCmdEng(&candidateString, ec, pContext))
+        {
+            return S_OK;
+        }
         hr = _AddComposingAndChar(ec, pContext, &candidateString);
 
         if (FAILED(hr))
@@ -139,6 +143,12 @@ HRESULT CDIME::_HandleCandidateWorker(TfEditCookie ec, _In_ ITfContext *pContext
     }
 
     candidateString.Set(pCandidateString, candidateLen);
+
+    if (_TryApplyCmdEng(&candidateString, ec, pContext))
+    {
+        hrReturn = S_OK;
+        goto Exit;
+    }
 
     BOOL fMakePhraseFromText = _pCompositionProcessorEngine->IsMakePhraseFromText();
     if (fMakePhraseFromText)

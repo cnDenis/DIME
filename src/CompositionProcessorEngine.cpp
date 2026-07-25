@@ -153,6 +153,7 @@ CCompositionProcessorEngine::CCompositionProcessorEngine()
     _candidateFontSize = 0;
     _settingsVersion = 0;
     _dictionaryVersion = 0;
+    _cmdStorageUsed = 0;
 
     _imeModeSnapshotValid = FALSE;
     _imeModeSnapshotFullWidth = FALSE;
@@ -624,6 +625,8 @@ void CCompositionProcessorEngine::GetCandidateList(_Inout_ CDIMEArray<CCandidate
         _pTableDictionaryEngine->CollectWord(&_keystrokeBuffer, pCandidateList);
     }
 
+    _ExpandCmdCandidates(pCandidateList);
+
     for (UINT index = 0; index < pCandidateList->Count();)
     {
         CCandidateListItem *pLI = pCandidateList->GetAt(index);
@@ -637,23 +640,524 @@ void CCompositionProcessorEngine::GetCandidateList(_Inout_ CDIMEArray<CCandidate
     }
 }
 
+BOOL CCompositionProcessorEngine::IsCmdCandidate(_In_ const CStringRange *pItem, _In_z_ LPCWSTR cmdLiteral)
+{
+    if (!pItem || !cmdLiteral || !pItem->Get())
+    {
+        return FALSE;
+    }
+    const size_t litLen = wcslen(cmdLiteral);
+    if (pItem->GetLength() != litLen)
+    {
+        return FALSE;
+    }
+    return wcsncmp(pItem->Get(), cmdLiteral, litLen) == 0;
+}
+
+BOOL CCompositionProcessorEngine::IsCmdEngCandidate(_In_ const CStringRange *pItem)
+{
+    return IsCmdCandidate(pItem, DIME_CMD_ENG);
+}
+
+BOOL CCompositionProcessorEngine::_StoreCmdCandidateString(_In_z_ LPCWSTR text, _Out_ CStringRange *pOut)
+{
+    if (!text || !pOut || _cmdStorageUsed >= _kCmdStorageMax)
+    {
+        return FALSE;
+    }
+    WCHAR* slot = _cmdStorage[_cmdStorageUsed];
+    if (FAILED(StringCchCopyW(slot, _kCmdStorageCch, text)))
+    {
+        return FALSE;
+    }
+    pOut->Set(slot, wcslen(slot));
+    _cmdStorageUsed++;
+    return TRUE;
+}
+
+BOOL CCompositionProcessorEngine::_AppendStoredCandidate(_Inout_ CDIMEArray<CCandidateListItem> *pOut, _In_z_ LPCWSTR text)
+{
+    if (!pOut || !text)
+    {
+        return FALSE;
+    }
+    CCandidateListItem* pLI = pOut->Append();
+    if (!pLI || !_StoreCmdCandidateString(text, &pLI->_ItemString))
+    {
+        return FALSE;
+    }
+    CStringRange emptyKey;
+    emptyKey.Set(L"", 0);
+    pLI->_FindKeyCode.Set(emptyKey);
+    return TRUE;
+}
+
+namespace
+{
+// 年份用 〇; 时分秒读数里的 0 用 零.
+static const WCHAR kCnYearDigit[] = L"〇一二三四五六七八九";
+static const WCHAR kCnCardinal[]  = L"零一二三四五六七八九";
+
+// 追加一位年份数字 (0-9 → 〇一二…).
+static void AppendYearDigit(_Inout_updates_(cch) WCHAR* buf, size_t cch, _Inout_ size_t& used, UINT d)
+{
+    if (d > 9 || used + 1 >= cch)
+    {
+        return;
+    }
+    buf[used++] = kCnYearDigit[d];
+    buf[used] = L'\0';
+}
+
+// 追加 0-99 的中文读数 (零/一/…/十/十一/…/二十/二十五/…).
+static void AppendChineseCardinal(_Inout_updates_(cch) WCHAR* buf, size_t cch, _Inout_ size_t& used, UINT n)
+{
+    if (n > 99 || used + 4 >= cch)
+    {
+        return;
+    }
+    if (n < 10)
+    {
+        buf[used++] = kCnCardinal[n];
+        buf[used] = L'\0';
+        return;
+    }
+    if (n < 20)
+    {
+        buf[used++] = L'十';
+        if (n > 10)
+        {
+            buf[used++] = kCnCardinal[n - 10];
+        }
+        buf[used] = L'\0';
+        return;
+    }
+    buf[used++] = kCnCardinal[n / 10];
+    buf[used++] = L'十';
+    if (n % 10 != 0)
+    {
+        buf[used++] = kCnCardinal[n % 10];
+    }
+    buf[used] = L'\0';
+}
+
+static void AppendLiteral(_Inout_updates_(cch) WCHAR* buf, size_t cch, _Inout_ size_t& used, _In_z_ LPCWSTR lit)
+{
+    for (; *lit && used + 1 < cch; ++lit)
+    {
+        buf[used++] = *lit;
+    }
+    buf[used] = L'\0';
+}
+
+// 二零二六年七月二十五日 (年逐位 〇, 月日读数).
+static void FormatChineseDate(_Out_writes_(cch) WCHAR* buf, size_t cch, const SYSTEMTIME& st)
+{
+    size_t used = 0;
+    buf[0] = L'\0';
+    UINT y = st.wYear;
+    AppendYearDigit(buf, cch, used, (y / 1000) % 10);
+    AppendYearDigit(buf, cch, used, (y / 100) % 10);
+    AppendYearDigit(buf, cch, used, (y / 10) % 10);
+    AppendYearDigit(buf, cch, used, y % 10);
+    AppendLiteral(buf, cch, used, L"年");
+    AppendChineseCardinal(buf, cch, used, st.wMonth);
+    AppendLiteral(buf, cch, used, L"月");
+    AppendChineseCardinal(buf, cch, used, st.wDay);
+    AppendLiteral(buf, cch, used, L"日");
+}
+
+// 十一时零六分三十秒.
+static void FormatChineseTime(_Out_writes_(cch) WCHAR* buf, size_t cch, const SYSTEMTIME& st, BOOL withSeconds)
+{
+    size_t used = 0;
+    buf[0] = L'\0';
+    AppendChineseCardinal(buf, cch, used, st.wHour);
+    AppendLiteral(buf, cch, used, L"时");
+    AppendChineseCardinal(buf, cch, used, st.wMinute);
+    AppendLiteral(buf, cch, used, L"分");
+    if (withSeconds)
+    {
+        AppendChineseCardinal(buf, cch, used, st.wSecond);
+        AppendLiteral(buf, cch, used, L"秒");
+    }
+}
+
+static void FormatChineseDateTime(_Out_writes_(cch) WCHAR* buf, size_t cch, const SYSTEMTIME& st, BOOL withSeconds)
+{
+    FormatChineseDate(buf, cch, st);
+    size_t used = wcslen(buf);
+    AppendLiteral(buf, cch, used, L" ");
+    WCHAR timeBuf[64] = {L'\0'};
+    FormatChineseTime(timeBuf, ARRAYSIZE(timeBuf), st, withSeconds);
+    AppendLiteral(buf, cch, used, timeBuf);
+}
+} // namespace
+
+void CCompositionProcessorEngine::_AppendCmdDateCandidates(_Inout_ CDIMEArray<CCandidateListItem> *pOut, const SYSTEMTIME& st)
+{
+    WCHAR buf[_kCmdStorageCch] = {L'\0'};
+    const UINT yy = static_cast<UINT>(st.wYear % 100);
+    // 顺序: YYYY 阿拉伯 → 中文读数 → YY 阿拉伯; 一律 YMD.
+    const WCHAR* yyyyFormats[] = {
+        L"%04u年%02u月%02u日",
+        L"%04u-%02u-%02u",
+        L"%04u/%02u/%02u",
+        L"%04u.%02u.%02u",
+        L"%04u%02u%02u",
+    };
+    for (int i = 0; i < ARRAYSIZE(yyyyFormats); i++)
+    {
+        StringCchPrintfW(buf, ARRAYSIZE(buf), yyyyFormats[i], st.wYear, st.wMonth, st.wDay);
+        _AppendStoredCandidate(pOut, buf);
+    }
+
+    FormatChineseDate(buf, ARRAYSIZE(buf), st);
+    _AppendStoredCandidate(pOut, buf);
+
+    const WCHAR* yyFormats[] = {
+        L"%02u年%02u月%02u日",
+        L"%02u-%02u-%02u",
+        L"%02u/%02u/%02u",
+        L"%02u.%02u.%02u",
+        L"%02u%02u%02u",
+    };
+    for (int i = 0; i < ARRAYSIZE(yyFormats); i++)
+    {
+        StringCchPrintfW(buf, ARRAYSIZE(buf), yyFormats[i], yy, st.wMonth, st.wDay);
+        _AppendStoredCandidate(pOut, buf);
+    }
+}
+
+void CCompositionProcessorEngine::_AppendCmdTimeCandidates(_Inout_ CDIMEArray<CCandidateListItem> *pOut, const SYSTEMTIME& st)
+{
+    WCHAR buf[_kCmdStorageCch] = {L'\0'};
+    struct { const WCHAR* fmt; BOOL withSec; } formats[] = {
+        { L"%02u时%02u分%02u秒", TRUE },
+        { L"%02u:%02u:%02u", TRUE },
+        { L"%02u时%02u分", FALSE },
+        { L"%02u:%02u", FALSE },
+    };
+    for (int i = 0; i < ARRAYSIZE(formats); i++)
+    {
+        if (formats[i].withSec)
+        {
+            StringCchPrintfW(buf, ARRAYSIZE(buf), formats[i].fmt, st.wHour, st.wMinute, st.wSecond);
+        }
+        else
+        {
+            StringCchPrintfW(buf, ARRAYSIZE(buf), formats[i].fmt, st.wHour, st.wMinute);
+        }
+        _AppendStoredCandidate(pOut, buf);
+    }
+
+    FormatChineseTime(buf, ARRAYSIZE(buf), st, TRUE);
+    _AppendStoredCandidate(pOut, buf);
+    FormatChineseTime(buf, ARRAYSIZE(buf), st, FALSE);
+    _AppendStoredCandidate(pOut, buf);
+}
+
+void CCompositionProcessorEngine::_AppendCmdNowCandidates(_Inout_ CDIMEArray<CCandidateListItem> *pOut, const SYSTEMTIME& st)
+{
+    WCHAR buf[_kCmdStorageCch] = {L'\0'};
+    StringCchPrintfW(buf, ARRAYSIZE(buf), L"%04u年%02u月%02u日 %02u时%02u分%02u秒",
+        st.wYear, st.wMonth, st.wDay, st.wHour, st.wMinute, st.wSecond);
+    _AppendStoredCandidate(pOut, buf);
+
+    StringCchPrintfW(buf, ARRAYSIZE(buf), L"%04u-%02u-%02u %02u:%02u:%02u",
+        st.wYear, st.wMonth, st.wDay, st.wHour, st.wMinute, st.wSecond);
+    _AppendStoredCandidate(pOut, buf);
+
+    StringCchPrintfW(buf, ARRAYSIZE(buf), L"%04u年%02u月%02u日%02u时%02u分",
+        st.wYear, st.wMonth, st.wDay, st.wHour, st.wMinute);
+    _AppendStoredCandidate(pOut, buf);
+
+    StringCchPrintfW(buf, ARRAYSIZE(buf), L"%04u/%02u/%02u %02u:%02u",
+        st.wYear, st.wMonth, st.wDay, st.wHour, st.wMinute);
+    _AppendStoredCandidate(pOut, buf);
+
+    // Unix 时间戳: 秒 / 毫秒 (UTC 纪元; 与上面本地显示为同一时刻).
+    {
+        FILETIME ft = {};
+        GetSystemTimeAsFileTime(&ft);
+        ULARGE_INTEGER uli = {};
+        uli.LowPart = ft.dwLowDateTime;
+        uli.HighPart = ft.dwHighDateTime;
+        // FILETIME: 100ns since 1601-01-01; Unix epoch 1970-01-01 差 116444736000000000.
+        const ULONGLONG kEpochDiff = 116444736000000000ull;
+        if (uli.QuadPart >= kEpochDiff)
+        {
+            const ULONGLONG unix100ns = uli.QuadPart - kEpochDiff;
+            const ULONGLONG unixSec = unix100ns / 10000000ull;
+            const ULONGLONG unixMs = unix100ns / 10000ull;
+            StringCchPrintfW(buf, ARRAYSIZE(buf), L"%llu", unixSec);
+            _AppendStoredCandidate(pOut, buf);
+            StringCchPrintfW(buf, ARRAYSIZE(buf), L"%llu", unixMs);
+            _AppendStoredCandidate(pOut, buf);
+        }
+    }
+
+    FormatChineseDateTime(buf, ARRAYSIZE(buf), st, TRUE);
+    _AppendStoredCandidate(pOut, buf);
+    FormatChineseDateTime(buf, ARRAYSIZE(buf), st, FALSE);
+    _AppendStoredCandidate(pOut, buf);
+}
+
+void CCompositionProcessorEngine::_AppendCmdWeekCandidates(_Inout_ CDIMEArray<CCandidateListItem> *pOut, const SYSTEMTIME& st)
+{
+    // SYSTEMTIME.wDayOfWeek: 0=Sunday .. 6=Saturday
+    static const WCHAR* kXingqi[] = {
+        L"星期日", L"星期一", L"星期二", L"星期三", L"星期四", L"星期五", L"星期六"
+    };
+    static const WCHAR* kZhou[] = {
+        L"周日", L"周一", L"周二", L"周三", L"周四", L"周五", L"周六"
+    };
+    static const WCHAR* kLibai[] = {
+        L"礼拜日", L"礼拜一", L"礼拜二", L"礼拜三", L"礼拜四", L"礼拜五", L"礼拜六"
+    };
+    static const WCHAR* kFullEn[] = {
+        L"Sunday", L"Monday", L"Tuesday", L"Wednesday", L"Thursday", L"Friday", L"Saturday"
+    };
+    static const WCHAR* kShortEn[] = {
+        L"Sun", L"Mon", L"Tue", L"Wed", L"Thu", L"Fri", L"Sat"
+    };
+
+    const WORD dow = st.wDayOfWeek;
+    if (dow > 6)
+    {
+        return;
+    }
+
+    _AppendStoredCandidate(pOut, kXingqi[dow]);
+    _AppendStoredCandidate(pOut, kZhou[dow]);
+    _AppendStoredCandidate(pOut, kLibai[dow]);
+    if (dow == 0)
+    {
+        // 口语里周日也常说「星期天」
+        _AppendStoredCandidate(pOut, L"星期天");
+    }
+    _AppendStoredCandidate(pOut, kFullEn[dow]);
+    _AppendStoredCandidate(pOut, kShortEn[dow]);
+}
+
+void CCompositionProcessorEngine::_ExpandCmdCandidates(_Inout_ CDIMEArray<CCandidateListItem> *pCandidateList)
+{
+    if (!pCandidateList || pCandidateList->Count() == 0)
+    {
+        return;
+    }
+
+    BOOL hasCmd = FALSE;
+    for (UINT i = 0; i < pCandidateList->Count(); i++)
+    {
+        CCandidateListItem* pLI = pCandidateList->GetAt(i);
+        if (pLI && pLI->_ItemString.GetLength() >= 4 &&
+            wcsncmp(pLI->_ItemString.Get(), DIME_CMD_PREFIX, 4) == 0)
+        {
+            hasCmd = TRUE;
+            break;
+        }
+    }
+    if (!hasCmd)
+    {
+        return;
+    }
+
+    _cmdStorageUsed = 0;
+    SYSTEMTIME st = {};
+    GetLocalTime(&st);
+
+    CDIMEArray<CCandidateListItem> rebuilt;
+    for (UINT i = 0; i < pCandidateList->Count(); i++)
+    {
+        CCandidateListItem* pLI = pCandidateList->GetAt(i);
+        if (!pLI)
+        {
+            continue;
+        }
+
+        if (IsCmdCandidate(&pLI->_ItemString, DIME_CMD_DATE))
+        {
+            _AppendCmdDateCandidates(&rebuilt, st);
+        }
+        else if (IsCmdCandidate(&pLI->_ItemString, DIME_CMD_TIME))
+        {
+            _AppendCmdTimeCandidates(&rebuilt, st);
+        }
+        else if (IsCmdCandidate(&pLI->_ItemString, DIME_CMD_NOW))
+        {
+            _AppendCmdNowCandidates(&rebuilt, st);
+        }
+        else if (IsCmdCandidate(&pLI->_ItemString, DIME_CMD_WEEK))
+        {
+            _AppendCmdWeekCandidates(&rebuilt, st);
+        }
+        else if (IsCmdCandidate(&pLI->_ItemString, DIME_CMD_ENG))
+        {
+            // 保留 CMD:ENG 原文, 上屏路径拦截; FindKeyCode 提示用途.
+            CCandidateListItem* pNew = rebuilt.Append();
+            if (pNew && _StoreCmdCandidateString(DIME_CMD_ENG, &pNew->_ItemString))
+            {
+                CStringRange hint;
+                if (_StoreCmdCandidateString(L"临时英文", &hint))
+                {
+                    pNew->_FindKeyCode.Set(hint);
+                }
+                else
+                {
+                    CStringRange emptyKey; emptyKey.Set(L"", 0); pNew->_FindKeyCode.Set(emptyKey);
+                }
+            }
+        }
+        else
+        {
+            CCandidateListItem* pNew = rebuilt.Append();
+            if (pNew)
+            {
+                *pNew = *pLI;
+            }
+        }
+    }
+
+    pCandidateList->Clear();
+    for (UINT i = 0; i < rebuilt.Count(); i++)
+    {
+        CCandidateListItem* pSrc = rebuilt.GetAt(i);
+        CCandidateListItem* pDst = pCandidateList->Append();
+        if (pSrc && pDst)
+        {
+            *pDst = *pSrc;
+        }
+    }
+}
+
 //+---------------------------------------------------------------------------
 //
 // _GetPinyinCandidateList
 //   Temporary pinyin input: search the pinyin dictionary with the keystroke
 //   buffer treated as a pinyin string (uppercased to match the dictionary).
+//   Pure digits: show Arabic / 中文 / 大写 / 带圈等数字形式候选.
 //
 //----------------------------------------------------------------------------
 
-void CCompositionProcessorEngine::_GetPinyinCandidateList(_Inout_ CDIMEArray<CCandidateListItem> *pCandidateList, BOOL loadAllCandidates)
+BOOL CCompositionProcessorEngine::_IsKeystrokeBufferPureDigits() const
 {
-    if (!IsPinyinDictionaryAvailable())
+    const DWORD_PTR len = _keystrokeBuffer.GetLength();
+    // 空缓冲也视为“可继续输数字” (z 后直接敲数字).
+    if (len == 0)
+    {
+        return TRUE;
+    }
+    const WCHAR* p = _keystrokeBuffer.Get();
+    if (!p)
+    {
+        return TRUE;
+    }
+    for (DWORD_PTR i = 0; i < len; i++)
+    {
+        if (p[i] < L'0' || p[i] > L'9')
+        {
+            return FALSE;
+        }
+    }
+    return TRUE;
+}
+
+void CCompositionProcessorEngine::_AppendPinyinDigitFormCandidates(_Inout_ CDIMEArray<CCandidateListItem> *pCandidateList)
+{
+    if (!pCandidateList)
+    {
+        return;
+    }
+    const DWORD_PTR len = _keystrokeBuffer.GetLength();
+    if (len == 0 || !_keystrokeBuffer.Get())
     {
         return;
     }
 
+    _cmdStorageUsed = 0;
+    const WCHAR* digits = _keystrokeBuffer.Get();
+
+    // 0-9 映射表 (逐位替换). 缺字形的用 ASCII 数字回退.
+    static const WCHAR kSimple[10]  = { L'零', L'一', L'二', L'三', L'四', L'五', L'六', L'七', L'八', L'九' };
+    // 〇一二… (圆圈零 U+3007)
+    static const WCHAR kSimpleCircleZero[10] = { L'〇', L'一', L'二', L'三', L'四', L'五', L'六', L'七', L'八', L'九' };
+    static const WCHAR kFinance[10] = { L'零', L'壹', L'贰', L'叁', L'肆', L'伍', L'陆', L'柒', L'捌', L'玖' };
+    // ⓪①②③④⑤⑥⑦⑧⑨
+    static const WCHAR kCircled[10] = {
+        0x24EA, 0x2460, 0x2461, 0x2462, 0x2463, 0x2464, 0x2465, 0x2466, 0x2467, 0x2468
+    };
+    // ⓿❶❷❸❹❺❻❼❽❾
+    static const WCHAR kDingbat[10] = {
+        0x24FF, 0x2776, 0x2777, 0x2778, 0x2779, 0x277A, 0x277B, 0x277C, 0x277D, 0x277E
+    };
+    // ⑴⑵…⑼; 0 无 '0'
+    static const WCHAR kParen[10] = {
+        L'0', 0x2474, 0x2475, 0x2476, 0x2477, 0x2478, 0x2479, 0x247A, 0x247B, 0x247C
+    };
+    // ⒈⒉…⒐; 0 用 '0'
+    static const WCHAR kPeriod[10] = {
+        L'0', 0x2488, 0x2489, 0x248A, 0x248B, 0x248C, 0x248D, 0x248E, 0x248F, 0x2490
+    };
+
+    auto mapDigits = [&](const WCHAR table[10]) -> BOOL {
+        WCHAR buf[_kCmdStorageCch] = {L'\0'};
+        if (len >= _kCmdStorageCch)
+        {
+            return FALSE;
+        }
+        for (DWORD_PTR i = 0; i < len; i++)
+        {
+            buf[i] = table[digits[i] - L'0'];
+        }
+        buf[len] = L'\0';
+        return _AppendStoredCandidate(pCandidateList, buf);
+    };
+
+    // 1) 阿拉伯数字原文
+    {
+        WCHAR buf[_kCmdStorageCch] = {L'\0'};
+        if (len < _kCmdStorageCch &&
+            SUCCEEDED(StringCchCopyN(buf, ARRAYSIZE(buf), digits, len)))
+        {
+            _AppendStoredCandidate(pCandidateList, buf);
+        }
+    }
+
+    // 2) 零一二…
+    mapDigits(kSimple);
+    // 3) 〇一二… (圆圈零)
+    mapDigits(kSimpleCircleZero);
+    // 4) 零壹贰…
+    mapDigits(kFinance);
+    // 5) ⓪①②…
+    mapDigits(kCircled);
+    // 6) ⓿❶❷…
+    mapDigits(kDingbat);
+
+    // 7) ⑴⑵…
+    mapDigits(kParen);
+    // 8) ⒈⒉…
+    mapDigits(kPeriod);
+}
+
+void CCompositionProcessorEngine::_GetPinyinCandidateList(_Inout_ CDIMEArray<CCandidateListItem> *pCandidateList, BOOL loadAllCandidates)
+{
     DWORD_PTR len = _keystrokeBuffer.GetLength();
     if (len == 0)
+    {
+        return;
+    }
+
+    // 纯数字: 不查拼音码表, 直接给多形式候选.
+    if (_IsKeystrokeBufferPureDigits())
+    {
+        _candidatesTruncated = FALSE;
+        _AppendPinyinDigitFormCandidates(pCandidateList);
+        return;
+    }
+
+    if (!IsPinyinDictionaryAvailable())
     {
         return;
     }
@@ -3462,6 +3966,8 @@ void CCompositionProcessorEngine::GetPreviewCandidateList(_In_z_ LPCWSTR key, _I
             pLI->_FindKeyCode.Set(emptyKey);
         }
     }
+
+    _ExpandCmdCandidates(pList);
 }
 
 void CCompositionProcessorEngine::SetDefaultCandidateTextFont()
@@ -3625,10 +4131,7 @@ BOOL CCompositionProcessorEngine::IsVirtualKeyNeed(UINT uCode, _In_reads_(1) WCH
         return TRUE;
     }
 
-    //
-    // While in temporary English mode, eat the keys we handle and route them
-    // to the composing handler. Everything typed is collected literally.
-    //
+    // Temporary English mode: collect literally; digits/letters go to composing.
     if (_isEnglishInput)
     {
         switch (uCode)
@@ -3647,10 +4150,8 @@ BOOL CCompositionProcessorEngine::IsVirtualKeyNeed(UINT uCode, _In_reads_(1) WCH
             return TRUE;
         default:
             {
-                WCHAR wch = (pwch ? *pwch : L'\0');
-                // Accept printable characters: letters, digits, punctuation, ';' and any
-                // character above the ASCII range (e.g. full-width symbols).
-                if (wch && (iswalnum(wch) || iswpunct(wch) || wch > 0x80))
+                WCHAR wchEng = (pwch ? *pwch : L'\0');
+                if (wchEng && (iswalnum(wchEng) || iswpunct(wchEng) || wchEng > 0x80))
                 {
                     if (pKeyState) { pKeyState->Category = CATEGORY_COMPOSING; pKeyState->Function = FUNCTION_INPUT; }
                     return TRUE;
@@ -3658,6 +4159,17 @@ BOOL CCompositionProcessorEngine::IsVirtualKeyNeed(UINT uCode, _In_reads_(1) WCH
                 return FALSE;
             }
         }
+    }
+
+    // z 模式纯数字: 数字键继续输入 (不用于选词), 候选为各种数字形式.
+    if (_isPinyinInput && pwch && *pwch >= L'0' && *pwch <= L'9' && _IsKeystrokeBufferPureDigits())
+    {
+        if (pKeyState)
+        {
+            pKeyState->Category = CATEGORY_COMPOSING;
+            pKeyState->Function = FUNCTION_INPUT;
+        }
+        return TRUE;
     }
 
     if (candidateMode == CANDIDATE_ORIGINAL || candidateMode == CANDIDATE_PHRASE || candidateMode == CANDIDATE_WITH_NEXT_COMPOSITION)
