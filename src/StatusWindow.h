@@ -50,6 +50,14 @@ public:
     void _SetHiddenByUser(BOOL hidden);
     BOOL _IsHiddenByUser() const { return _isHiddenByUser; }
     void _LoadHiddenState();
+
+    // 状态栏整体透明度: 百分数 20-100 (注册表 StatusWindowOpacity), 默认 100.
+    // 输入法关闭 (灰显) 时按设定值的 70% 显示.
+    void _SetOpacityPercent(int percent);
+    int  _GetOpacityPercent() const;
+    void _LoadOpacity();
+    void _ApplyOpacity();
+
     virtual void _OnMouseMove(POINT pt);
 
 private:
@@ -83,6 +91,7 @@ private:
     int  _hoverItem;
 
     BOOL _isHiddenByUser = FALSE;   // user chose to hide via the context menu
+    BYTE _opacityAlpha = 255;       // SetLayeredWindowAttributes alpha (255=不透明)
 
     BOOL _isDragging;
     POINT _dragOffset;

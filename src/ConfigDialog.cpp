@@ -46,6 +46,8 @@ enum
     IDC_CMB_PAGECNT     = 221,
 
     IDC_CHK_SHOWSTATUS  = 230,
+    IDC_ST_OPACITY_LBL  = 235,
+    IDC_CMB_OPACITY     = 236,
     IDC_ST_FONTSIZE_LBL = 231,
     IDC_CMB_FONTSIZE    = 232,
     IDC_ST_PREVIEW_LBL  = 233,
@@ -99,6 +101,8 @@ static WNDPROC s_prevAboutLinkWndProc = nullptr;
 static const WCHAR kRepoUrl[] = L"https://github.com/cnDenis/DIME";
 
 static const int kFontSizeChoices[] = {0, 12, 14, 16, 18, 20, 24, 28, 32};
+// 状态栏透明度百分数 (20-100); 注册表 StatusWindowOpacity.
+static const int kOpacityChoices[] = {100, 90, 80, 70, 60, 50, 40, 30, 20};
 
 static LRESULT CALLBACK _AboutLinkWndProc(_In_ HWND hWnd, UINT uMsg, WPARAM wParam, LPARAM lParam)
 {
@@ -702,9 +706,39 @@ static void _InitStates(_In_ DlgState* pState)
         _PopulateDictionaryCombo(pState, cmbDict, dictName);
     }
 
-    // --- Interface (status bar, page size, font) ---
+    // --- Interface (status bar, opacity, page size, font) ---
     BOOL hidden = (p->_GetStatusWindow() != nullptr) ? p->_GetStatusWindow()->_IsHiddenByUser() : FALSE;
     CheckDlgButton(pState->hwndPanels[1], IDC_CHK_SHOWSTATUS, hidden ? BST_UNCHECKED : BST_CHECKED);
+
+    {
+        int pct = 100;
+        if (p->_GetStatusWindow() != nullptr)
+        {
+            pct = p->_GetStatusWindow()->_GetOpacityPercent();
+        }
+        else
+        {
+            DWORD dw = 100;
+            _RegGetDWORD(L"StatusWindowOpacity", 100, dw);
+            pct = static_cast<int>(dw);
+        }
+        if (pct < 20) pct = 20;
+        if (pct > 100) pct = 100;
+        HWND cmbOp = GetDlgItem(pState->hwndPanels[1], IDC_CMB_OPACITY);
+        if (cmbOp != nullptr)
+        {
+            int sel = 0;
+            for (int i = 0; i < ARRAYSIZE(kOpacityChoices); ++i)
+            {
+                if (kOpacityChoices[i] == pct)
+                {
+                    sel = i;
+                    break;
+                }
+            }
+            SendMessage(cmbOp, CB_SETCURSEL, sel, 0);
+        }
+    }
 
     {
         int ps = 10;
@@ -836,6 +870,18 @@ static void _OnSettingChanged(_In_ DlgState* pState)
         fontPx = kFontSizeChoices[sel];
     }
 
+    int opacityPct = 100;
+    HWND cmbOp = GetDlgItem(pState->hwndPanels[1], IDC_CMB_OPACITY);
+    if (cmbOp != nullptr)
+    {
+        int sel = (int)SendMessage(cmbOp, CB_GETCURSEL, 0, 0);
+        if (sel < 0 || sel >= ARRAYSIZE(kOpacityChoices))
+        {
+            sel = 0;
+        }
+        opacityPct = kOpacityChoices[sel];
+    }
+
     BOOL hkOnly = (IsDlgButtonChecked(pState->hwndPanels[2], IDC_CHK_HOTKEY_ONLYCOMMON) == BST_CHECKED);
     BOOL hkPunct = (IsDlgButtonChecked(pState->hwndPanels[2], IDC_CHK_HOTKEY_PUNCTUATION) == BST_CHECKED);
     BOOL hkFull = (IsDlgButtonChecked(pState->hwndPanels[2], IDC_CHK_HOTKEY_FULLHALF) == BST_CHECKED);
@@ -872,6 +918,7 @@ static void _OnSettingChanged(_In_ DlgState* pState)
         _RegSetDWORD(L"HotkeyOnlyCommon", hkOnly ? 1 : 0);
         _RegSetDWORD(L"HotkeyPunctuation", hkPunct ? 1 : 0);
         _RegSetDWORD(L"HotkeyDoubleSingleByte", hkFull ? 1 : 0);
+        _RegSetDWORD(L"StatusWindowOpacity", (DWORD)opacityPct);
     }
 
     BOOL showStatus = (IsDlgButtonChecked(pState->hwndPanels[1], IDC_CHK_SHOWSTATUS) == BST_CHECKED);
@@ -880,7 +927,12 @@ static void _OnSettingChanged(_In_ DlgState* pState)
     if (sw != nullptr)
     {
         sw->_SetHiddenByUser(!showStatus);
+        sw->_SetOpacityPercent(opacityPct);
         sw->_Show(showStatus ? TRUE : FALSE);
+    }
+    else
+    {
+        _RegSetDWORD(L"StatusWindowOpacity", (DWORD)opacityPct);
     }
     CCompositionProcessorEngine::SetSyncSettingsOnFocusEnabled(syncOnFocus);
 
@@ -978,11 +1030,32 @@ static void _CreateControls(_In_ HWND hWnd, _In_ DlgState* pState)
     const int uiComboW = 120;
     _CreateCtrl(upanel, L"BUTTON", L"显示浮动状态栏", WS_CHILD | WS_VISIBLE | BS_AUTOCHECKBOX,
         16, 20, pw - 32, 24, IDC_CHK_SHOWSTATUS, pState->hFont);
+    _CreateCtrl(upanel, L"STATIC", L"状态栏透明度：", WS_CHILD | WS_VISIBLE | SS_LEFT | SS_CENTERIMAGE,
+        16, 52, uiLabelW, 24, IDC_ST_OPACITY_LBL, pState->hFont);
+    HWND hwndOpacity = _CreateCtrl(upanel, L"COMBOBOX", nullptr,
+        WS_CHILD | WS_VISIBLE | WS_VSCROLL | CBS_DROPDOWNLIST,
+        uiComboX, 52, uiComboW, 200, IDC_CMB_OPACITY, pState->hFont);
+    if (hwndOpacity != nullptr)
+    {
+        for (int i = 0; i < ARRAYSIZE(kOpacityChoices); ++i)
+        {
+            WCHAR buf[16] = {0};
+            if (kOpacityChoices[i] >= 100)
+            {
+                StringCchCopy(buf, ARRAYSIZE(buf), L"不透明");
+            }
+            else
+            {
+                StringCchPrintf(buf, ARRAYSIZE(buf), L"%d%%", kOpacityChoices[i]);
+            }
+            SendMessage(hwndOpacity, CB_ADDSTRING, 0, (LPARAM)buf);
+        }
+    }
     _CreateCtrl(upanel, L"STATIC", L"每页候选字数：", WS_CHILD | WS_VISIBLE | SS_LEFT | SS_CENTERIMAGE,
-        16, 52, uiLabelW, 24, IDC_ST_PAGECNT_LBL, pState->hFont);
+        16, 84, uiLabelW, 24, IDC_ST_PAGECNT_LBL, pState->hFont);
     HWND hwndCombo = _CreateCtrl(upanel, L"COMBOBOX", nullptr,
         WS_CHILD | WS_VISIBLE | WS_VSCROLL | CBS_DROPDOWNLIST,
-        uiComboX, 52, uiComboW, 200, IDC_CMB_PAGECNT, pState->hFont);
+        uiComboX, 84, uiComboW, 200, IDC_CMB_PAGECNT, pState->hFont);
     if (hwndCombo != nullptr)
     {
         for (int i = 1; i <= 10; ++i)
@@ -993,10 +1066,10 @@ static void _CreateControls(_In_ HWND hWnd, _In_ DlgState* pState)
         }
     }
     _CreateCtrl(upanel, L"STATIC", L"候选框字号：", WS_CHILD | WS_VISIBLE | SS_LEFT | SS_CENTERIMAGE,
-        16, 84, uiLabelW, 24, IDC_ST_FONTSIZE_LBL, pState->hFont);
+        16, 116, uiLabelW, 24, IDC_ST_FONTSIZE_LBL, pState->hFont);
     HWND hwndFontCombo = _CreateCtrl(upanel, L"COMBOBOX", nullptr,
         WS_CHILD | WS_VISIBLE | WS_VSCROLL | CBS_DROPDOWNLIST,
-        uiComboX, 84, uiComboW, 220, IDC_CMB_FONTSIZE, pState->hFont);
+        uiComboX, 116, uiComboW, 220, IDC_CMB_FONTSIZE, pState->hFont);
     if (hwndFontCombo != nullptr)
     {
         WCHAR autoLabel[32] = {0};
@@ -1011,9 +1084,9 @@ static void _CreateControls(_In_ HWND hWnd, _In_ DlgState* pState)
         }
     }
     _CreateCtrl(upanel, L"STATIC", L"预览：", WS_CHILD | WS_VISIBLE | SS_LEFT,
-        16, 120, pw - 32, 24, IDC_ST_PREVIEW_LBL, pState->hFont);
+        16, 152, pw - 32, 24, IDC_ST_PREVIEW_LBL, pState->hFont);
     pState->hwndPreview = _CreateCtrl(upanel, L"STATIC", nullptr,
-        WS_CHILD | WS_VISIBLE, 16, 148, CAND_WINDOW_WIDTH_PX, 120, IDC_PREVIEW, nullptr);
+        WS_CHILD | WS_VISIBLE, 16, 180, CAND_WINDOW_WIDTH_PX, 120, IDC_PREVIEW, nullptr);
     if (pState->hwndPreview != nullptr)
     {
         SetWindowLongPtr(pState->hwndPreview, GWLP_USERDATA, (LONG_PTR)pState);

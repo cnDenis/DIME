@@ -13,7 +13,7 @@
 
 #define DIME_VER_MAJOR 1
 #define DIME_VER_MINOR 4
-#define DIME_VER_PATCH 0
+#define DIME_VER_PATCH 1
 
 #define DIME_VER_STRINGIZE2(x) #x
 #define DIME_VER_STRINGIZE(x)  DIME_VER_STRINGIZE2(x)
