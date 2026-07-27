@@ -253,6 +253,11 @@ HRESULT CDIME::_HandleCandidateArrowKey(TfEditCookie ec, _In_ ITfContext *pConte
     ec;
     pContext;
 
+    if (!_pCandidateListUIPresenter)
+    {
+        return S_OK;
+    }
+
     _pCandidateListUIPresenter->AdviseUIChangedByArrowKey(keyFunction);
 
     return S_OK;
@@ -324,6 +329,11 @@ HRESULT CDIME::_HandlePhraseArrowKey(TfEditCookie ec, _In_ ITfContext *pContext,
 {
     ec;
     pContext;
+
+    if (!_pCandidateListUIPresenter)
+    {
+        return S_OK;
+    }
 
     _pCandidateListUIPresenter->AdviseUIChangedByArrowKey(keyFunction);
 
@@ -575,7 +585,12 @@ HRESULT CCandidateListUIPresenter::ToHideCandidateWindow()
 
 STDAPI CCandidateListUIPresenter::IsShown(BOOL *pIsShow)
 {
-    *pIsShow = _pCandidateWnd->_IsWindowVisible();
+    if (pIsShow == nullptr)
+    {
+        return E_INVALIDARG;
+    }
+
+    *pIsShow = (_pCandidateWnd != nullptr) ? _pCandidateWnd->_IsWindowVisible() : FALSE;
     return S_OK;
 }
 
@@ -650,7 +665,7 @@ STDAPI CCandidateListUIPresenter::GetSelection(UINT *pSelectedCandidateIndex)
 
 STDAPI CCandidateListUIPresenter::GetString(UINT uIndex, BSTR *pbstr)
 {
-    if (!_pCandidateWnd || (uIndex > _pCandidateWnd->_GetCount()))
+    if (!_pCandidateWnd || (uIndex >= _pCandidateWnd->_GetCount()))
     {
         return E_FAIL;
     }

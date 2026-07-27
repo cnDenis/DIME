@@ -158,7 +158,7 @@ CLangBarItemButton::~CLangBarItemButton()
 //
 //----------------------------------------------------------------------------
 
-void CLangBarItemButton::CleanUp()
+void CLangBarItemButton::CleanUp(_In_opt_ ITfThreadMgr *pThreadMgr)
 {
     if (_pTooltipText)
     {
@@ -166,19 +166,12 @@ void CLangBarItemButton::CleanUp()
         _pTooltipText = nullptr;
     }
 
-    ITfThreadMgr* pThreadMgr = nullptr;
-    HRESULT hr = CoCreateInstance(CLSID_TF_ThreadMgr, 
-        NULL, 
-        CLSCTX_INPROC_SERVER, 
-        IID_ITfThreadMgr, 
-        (void**)&pThreadMgr);
-    if (SUCCEEDED(hr))
+    // Must use the ThreadMgr that registered this item. CoCreate'ing a new one
+    // cannot remove the item from the original language bar.
+    if (pThreadMgr)
     {
         _UnregisterCompartment(pThreadMgr);
-
         _RemoveItem(pThreadMgr);
-        pThreadMgr->Release();
-        pThreadMgr = nullptr;
     }
 
     if (_pCompartment)
@@ -284,7 +277,7 @@ STDAPI CLangBarItemButton::GetStatus(_Out_ DWORD *pdwStatus)
 {
     if (pdwStatus == nullptr)
     {
-        E_INVALIDARG;
+        return E_INVALIDARG;
     }
 
     *pdwStatus = _status;

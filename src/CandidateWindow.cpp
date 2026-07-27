@@ -1120,7 +1120,7 @@ void CCandidateWindow::_DrawBorder(_In_ HWND wndHandle, _In_ int cx)
     SelectObject(dcHandle, hPenOld);
     SelectObject(dcHandle, hBorderBrushOld);
     DeleteObject(hPen);
-    DeleteObject(hBorderBrush);
+    // Do not DeleteObject stock brushes from GetStockObject.
     ReleaseDC(wndHandle, dcHandle);
 
 }

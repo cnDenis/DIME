@@ -33,7 +33,8 @@ __inline UINT VKeyFromVKPacketAndWchar(UINT vk, WCHAR wch)
         }
         else if ((wch >= L'a') && (wch <= L'z'))
         {
-            vkRet = (UINT)(L'A') + ((UINT)(L'z') - static_cast<UINT>(wch));
+            // VK codes for letters are the uppercase ASCII values.
+            vkRet = static_cast<UINT>(wch - L'a' + L'A');
         }
         else if ((wch >= L'A') && (wch <= L'Z'))
         {
@@ -122,8 +123,11 @@ BOOL CDIME::_IsKeyEaten(_In_ ITfContext *pContext, UINT codeIn, _Out_ UINT *pCod
     //
     // Get composition engine
     //
-    CCompositionProcessorEngine *pCompositionProcessorEngine;
-    pCompositionProcessorEngine = _pCompositionProcessorEngine;
+    CCompositionProcessorEngine *pCompositionProcessorEngine = _pCompositionProcessorEngine;
+    if (!pCompositionProcessorEngine)
+    {
+        return isTouchKeyboardSpecialKeys;
+    }
 
     if (isOpen)
     {
@@ -154,9 +158,11 @@ BOOL CDIME::_IsKeyEaten(_In_ ITfContext *pContext, UINT codeIn, _Out_ UINT *pCod
     //
     // Punctuation
     //
+    // Also eat while a candidate list is showing so the selected candidate
+    // and the punctuation can be committed together (_HandleCompositionPunctuation).
     if (pCompositionProcessorEngine->IsPunctuation(wch))
     {
-        if ((_candidateMode == CANDIDATE_NONE) && isPunctuation)
+        if (isPunctuation)
         {
             if (pKeyState)
             {

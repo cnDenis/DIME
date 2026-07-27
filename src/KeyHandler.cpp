@@ -949,6 +949,9 @@ HRESULT CDIME::_HandleCompositionPunctuation(TfEditCookie ec, _In_ ITfContext *p
 {
     HRESULT hr = S_OK;
 
+    // Commit the selected candidate first (if any), then the punctuation.
+    // Must finalize rather than only compose: _HandleCancel clears the
+    // composition range and would erase any text still in composing state.
     if (_candidateMode != CANDIDATE_NONE && _pCandidateListUIPresenter)
     {
         DWORD_PTR candidateLen = 0;
@@ -961,7 +964,11 @@ HRESULT CDIME::_HandleCompositionPunctuation(TfEditCookie ec, _In_ ITfContext *p
 
         if (candidateLen)
         {
-            _AddComposingAndChar(ec, pContext, &candidateString);
+            hr = _AddCharAndFinalize(ec, pContext, &candidateString);
+            if (FAILED(hr))
+            {
+                return hr;
+            }
         }
     }
     //
@@ -982,7 +989,7 @@ HRESULT CDIME::_HandleCompositionPunctuation(TfEditCookie ec, _In_ ITfContext *p
         return hr;
     }
 
-    _HandleCancel(ec, pContext);
+    _HandleComplete(ec, pContext);
 
     return S_OK;
 }

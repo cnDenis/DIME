@@ -327,12 +327,21 @@ HRESULT CCompartmentEventSink::_Advise(_In_ IUnknown *punk, _In_ REFGUID guidCom
 HRESULT CCompartmentEventSink::_Unadvise()
 {
     HRESULT hr = S_OK;
-    ITfSource* pSource = nullptr;
 
-    hr = _pCompartment->QueryInterface(IID_ITfSource, (void **)&pSource);
-    if (SUCCEEDED(hr))
+    if (_pCompartment == nullptr)
     {
-        hr = pSource->UnadviseSink(_dwCookie);
+        _dwCookie = 0;
+        return S_OK;
+    }
+
+    ITfSource* pSource = nullptr;
+    hr = _pCompartment->QueryInterface(IID_ITfSource, (void **)&pSource);
+    if (SUCCEEDED(hr) && pSource)
+    {
+        if (_dwCookie != 0)
+        {
+            hr = pSource->UnadviseSink(_dwCookie);
+        }
         pSource->Release();
     }
 

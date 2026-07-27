@@ -46,7 +46,9 @@ public:
     BOOL _RegisterCompartment(_In_ ITfThreadMgr *pThreadMgr, TfClientId tfClientId, REFGUID guidCompartment);
     BOOL _UnregisterCompartment(_In_ ITfThreadMgr *pThreadMgr);
 
-    void CleanUp();
+    // pThreadMgr must be the same instance used at _AddItem / _RegisterCompartment.
+    // Pass nullptr only when those were never registered or already cleaned up.
+    void CleanUp(_In_opt_ ITfThreadMgr *pThreadMgr = nullptr);
 
     void SetStatus(DWORD dwStatus, BOOL fSet);
     void UpdateDisplay();

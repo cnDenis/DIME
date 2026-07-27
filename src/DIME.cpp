@@ -97,6 +97,8 @@ CDIME::CDIME()
     DllAddRef();
 
     _pThreadMgr = nullptr;
+    _tfClientId = TF_CLIENTID_NULL;
+    _dwActivateFlags = 0;
 
     _threadMgrEventSinkCookie = TF_INVALID_COOKIE;
 
@@ -107,9 +109,14 @@ CDIME::CDIME()
 
     _dwThreadFocusSinkCookie = TF_INVALID_COOKIE;
 
+    _pCompositionProcessorEngine = nullptr;
+
+    _pLangBarItem = nullptr;
+
     _pComposition = nullptr;
 
-    _pCompositionProcessorEngine = nullptr;
+    _gaDisplayAttributeInput = 0;
+    _gaDisplayAttributeConverted = 0;
 
     _candidateMode = CANDIDATE_NONE;
     _pCandidateListUIPresenter = nullptr;
@@ -120,13 +127,15 @@ CDIME::CDIME()
 
     _pDocMgrLastFocused = nullptr;
 
+    _pContext = nullptr;
+
     _pSIPIMEOnOffCompartment = nullptr;
     _dwSIPIMEOnOffCompartmentSinkCookie = 0;
     _msgWndHandle = nullptr;
 
-    _pContext = nullptr;
-
     _refCount = 1;
+
+    _pITfFnSearchCandidateProvider = nullptr;
 }
 
 //+---------------------------------------------------------------------------
@@ -268,7 +277,6 @@ void CDIME::_RefreshStatusWindow()
     // the registry here keeps every other instance in sync (and survives an IME
     // restart), so the bar stays hidden no matter where it was hidden from.
     _pStatusWindow->_LoadHiddenState();
-    _pStatusWindow->_LoadOpacity();
 
     // Respect an explicit "hide" chosen from the context menu: keep the bar
     // hidden across refreshes until the user shows it again.
@@ -305,7 +313,7 @@ void CDIME::_RefreshStatusWindow()
     }
 
     // IME off (English mode, e.g. Ctrl+Space): keep the bar visible but gray
-    // out every icon, and auto-dim opacity as an "inactive" hint.
+    // out every icon as an "inactive" hint rather than hiding it.
     if (!isOpen)
     {
         _pStatusWindow->_SetGrayed(TRUE);
@@ -413,7 +421,7 @@ STDAPI CDIME::QueryInterface(REFIID riid, _Outptr_ void **ppvObj)
     }
     else if (IsEqualIID(riid, IID_ITfCompositionSink))
     {
-        *ppvObj = (ITfKeyEventSink *)this;
+        *ppvObj = (ITfCompositionSink *)this;
     }
     else if (IsEqualIID(riid, IID_ITfDisplayAttributeProvider))
     {
@@ -608,15 +616,15 @@ STDAPI CDIME::Deactivate()
     {
         delete _pCandidateListUIPresenter;
         _pCandidateListUIPresenter = nullptr;
-
-        if (pContext)
-        {
-            pContext->Release();
-        }
-
-        _candidateMode = CANDIDATE_NONE;
-        _isCandidateWithWildcard = FALSE;
     }
+
+    if (pContext)
+    {
+        pContext->Release();
+    }
+
+    _candidateMode = CANDIDATE_NONE;
+    _isCandidateWithWildcard = FALSE;
 
     _UninitFunctionProviderSink();
 
@@ -640,6 +648,7 @@ STDAPI CDIME::Deactivate()
     if (_pThreadMgr != nullptr)
     {
         _pThreadMgr->Release();
+        _pThreadMgr = nullptr;
     }
 
     _tfClientId = TF_CLIENTID_NULL;

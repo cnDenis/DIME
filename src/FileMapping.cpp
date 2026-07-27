@@ -88,16 +88,17 @@ BOOL CFileMapping::SetupReadBuffer()
                 {
                     _pReadBuffer = (WCHAR*)_pMapBuffer;
 
-                    // skip Unicode byte order mark
+                    // skip Unicode byte order mark (_fileSize is in bytes)
                     if (*((WCHAR*)_pMapBuffer) == Global::UnicodeByteOrderMark)
                     {
                         _pReadBuffer++;
-                        _fileSize--;
+                        _fileSize -= sizeof(WCHAR);
                     }
                     return TRUE;
                 }
 
-                UnmapViewOfFile(_pReadBuffer);
+                UnmapViewOfFile(_pMapBuffer);
+                _pMapBuffer = nullptr;
                 _pReadBuffer = nullptr;
             }
 

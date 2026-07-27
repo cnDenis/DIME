@@ -170,6 +170,16 @@ CCompositionProcessorEngine::CCompositionProcessorEngine()
 
 CCompositionProcessorEngine::~CCompositionProcessorEngine()
 {
+    // Unregister preserved keys on the ThreadMgr used at InitPreservedKey.
+    // XPreservedKey dtor must not CoCreate a different ThreadMgr.
+    if (_pThreadMgr)
+    {
+        _PreservedKey_IMEMode.UninitPreservedKey(_pThreadMgr);
+        _PreservedKey_DoubleSingleByte.UninitPreservedKey(_pThreadMgr);
+        _PreservedKey_Punctuation.UninitPreservedKey(_pThreadMgr);
+        _PreservedKey_OnlyCommon.UninitPreservedKey(_pThreadMgr);
+    }
+
     if (_pTableDictionaryEngine)
     {
         delete _pTableDictionaryEngine;
@@ -178,19 +188,19 @@ CCompositionProcessorEngine::~CCompositionProcessorEngine()
 
     if (_pLanguageBar_IMEMode)
     {
-        _pLanguageBar_IMEMode->CleanUp();
+        _pLanguageBar_IMEMode->CleanUp(_pThreadMgr);
         _pLanguageBar_IMEMode->Release();
         _pLanguageBar_IMEMode = nullptr;
     }
     if (_pLanguageBar_DoubleSingleByte)
     {
-        _pLanguageBar_DoubleSingleByte->CleanUp();
+        _pLanguageBar_DoubleSingleByte->CleanUp(_pThreadMgr);
         _pLanguageBar_DoubleSingleByte->Release();
         _pLanguageBar_DoubleSingleByte = nullptr;
     }
     if (_pLanguageBar_Punctuation)
     {
-        _pLanguageBar_Punctuation->CleanUp();
+        _pLanguageBar_Punctuation->CleanUp(_pThreadMgr);
         _pLanguageBar_Punctuation->Release();
         _pLanguageBar_Punctuation = nullptr;
     }
@@ -1529,7 +1539,7 @@ void CCompositionProcessorEngine::SetPreservedKey(const CLSID clsid, TF_PRESERVE
         return;
     }
 
-    StringCchCopy((LPWSTR)pXPreservedKey->Description, srgKeystrokeBufLen, pwszDescription);
+    StringCchCopy((LPWSTR)pXPreservedKey->Description, srgKeystrokeBufLen + 1, pwszDescription);
 
     return;
 }
@@ -3672,19 +3682,12 @@ CCompositionProcessorEngine::XPreservedKey::XPreservedKey()
 
 CCompositionProcessorEngine::XPreservedKey::~XPreservedKey()
 {
-    ITfThreadMgr* pThreadMgr = nullptr;
-
-    HRESULT hr = CoCreateInstance(CLSID_TF_ThreadMgr, NULL, CLSCTX_INPROC_SERVER, IID_ITfThreadMgr, (void**)&pThreadMgr);
-    if (SUCCEEDED(hr))
-    {
-        UninitPreservedKey(pThreadMgr);
-        pThreadMgr->Release();
-        pThreadMgr = nullptr;
-    }
-
+    // UnpreserveKey must run against the ThreadMgr used at PreserveKey.
+    // ~CCompositionProcessorEngine calls UninitPreservedKey before members die.
     if (Description)
     {
         delete [] Description;
+        Description = nullptr;
     }
 }
 //+---------------------------------------------------------------------------
