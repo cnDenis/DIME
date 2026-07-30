@@ -3536,6 +3536,7 @@
 "ASAW"="苦丁茶"
 "ASCA"="黄梅戏"
 "ASDB"="花样百出"
+"ASDF"="CMD:ASDF"
 "ASDI"="䕩"
 "ASDO"="草木灰"
 "ASEP"="苯胺"
@@ -60546,6 +60547,7 @@
 "QWDM"="锥面"
 "QWDQ"="久仰大名"
 "QWDT"="争分夺秒"
+"QWER"="CMD:QWER"
 "QWET"="鉁"
 "QWEV"="欠妥"
 "QWFF"="欠款"
@@ -61134,6 +61136,7 @@
 "RAMY"="摃"
 "RAMY"="㨺"
 "RAN"="拒"
+"RAND"="CMD:RAND"
 "RANG"="拒"
 "RANH"="拒收"
 "RANI"="撒尿"
@@ -97913,12 +97916,3 @@
 "YYYY"="言"
 "YYYY"="方言"
 "YYYY"="文言"
-
-# DIME built-in commands
-"ZZRQ"="CMD:DATE"
-"ZZSJ"="CMD:TIME"
-"ZZXS"="CMD:NOW"
-"ZZYW"="CMD:ENG"�� 
- " W E E K " = " C M D : W E E K "  
- " Z Z X Q " = " C M D : W E E K "  
- 

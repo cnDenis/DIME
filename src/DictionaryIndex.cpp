@@ -30,6 +30,7 @@ BOOL CDictionaryIndex::Build(_In_ CFile *pFile)
 {
     _isBuilt = FALSE;
     _exactMap.clear();
+    _reverseMap.clear();
     _sortedKeys.clear();
 
     if (!pFile)
@@ -67,15 +68,6 @@ BOOL CDictionaryIndex::Build(_In_ CFile *pFile)
                     {
                         std::wstring value(pValue->Get(), pValue->Get() + pValue->GetLength());
                         entries.emplace_back(value);
-
-                        // Build reverse map (word -> wubi code). A word may map
-                        // to several codes, so keep the shortest (most basic)
-                        // one as the displayed encoding.
-                        auto it = _reverseMap.find(value);
-                        if (it == _reverseMap.end() || key.length() < it->second.length())
-                        {
-                            _reverseMap[value] = key;
-                        }
                     }
                 }
             }
@@ -97,6 +89,36 @@ BOOL CDictionaryIndex::Build(_In_ CFile *pFile)
             dwTotalBufLen -= bufLenOneLine;
             indexTrace += bufLenOneLine;
         }
+    }
+
+    // Reverse map: word -> code. Prefer codes where the word is the first
+    // candidate (rank 0); among equal ranks keep the shorter code.
+    struct ReversePick
+    {
+        std::wstring code;
+        size_t rank;
+    };
+    std::unordered_map<std::wstring, ReversePick> best;
+    for (const auto &entry : _exactMap)
+    {
+        const std::wstring &code = entry.first;
+        const std::vector<std::wstring> &words = entry.second;
+        for (size_t rank = 0; rank < words.size(); rank++)
+        {
+            const std::wstring &word = words[rank];
+            auto it = best.find(word);
+            if (it == best.end() ||
+                rank < it->second.rank ||
+                (rank == it->second.rank && code.length() < it->second.code.length()))
+            {
+                best[word] = ReversePick{ code, rank };
+            }
+        }
+    }
+    _reverseMap.reserve(best.size());
+    for (const auto &kv : best)
+    {
+        _reverseMap.emplace(kv.first, kv.second.code);
     }
 
     _sortedKeys.reserve(_exactMap.size());

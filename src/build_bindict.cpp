@@ -587,8 +587,6 @@ int wmain(int argc, wchar_t** argv)
     // Forward map: code -> words (word order preserved as in the file).
     // std::map keeps codes sorted by ordinal (matches runtime std::sort on wstring).
     std::map<wstring, std::vector<wstring>> codeToWords;
-    // Reverse map: word -> shortest code (first wins on ties), built in file order.
-    std::unordered_map<wstring, wstring> wordToCodeTmp;
 
     size_t lineStart = 0;
     uint32_t lineCount = 0, skipped = 0;
@@ -634,12 +632,6 @@ int wmain(int argc, wchar_t** argv)
                     if (!key.empty() && !val.empty() && okLen)
                     {
                         codeToWords[key].push_back(val);
-
-                        auto it = wordToCodeTmp.find(val);
-                        if (it == wordToCodeTmp.end() || key.size() < it->second.size())
-                        {
-                            wordToCodeTmp[val] = key;
-                        }
                     }
                     else
                     {
@@ -657,8 +649,35 @@ int wmain(int argc, wchar_t** argv)
         return 4;   // 4 = not a DIME dictionary (skipped by batch mode)
     }
 
-    // Reverse entries sorted by word (ordinal).
-    std::map<wstring, wstring> wordToCode(wordToCodeTmp.begin(), wordToCodeTmp.end());
+    // Reverse map: word -> code. Prefer first-candidate hit (rank 0); among
+    // equal ranks keep the shorter code.
+    struct ReversePick
+    {
+        wstring code;
+        size_t rank;
+    };
+    std::unordered_map<wstring, ReversePick> wordToCodeBest;
+    for (const auto& kv : codeToWords)
+    {
+        const wstring& code = kv.first;
+        const std::vector<wstring>& words = kv.second;
+        for (size_t rank = 0; rank < words.size(); ++rank)
+        {
+            const wstring& word = words[rank];
+            auto it = wordToCodeBest.find(word);
+            if (it == wordToCodeBest.end() ||
+                rank < it->second.rank ||
+                (rank == it->second.rank && code.size() < it->second.code.size()))
+            {
+                wordToCodeBest[word] = ReversePick{ code, rank };
+            }
+        }
+    }
+    std::map<wstring, wstring> wordToCode;
+    for (const auto& kv : wordToCodeBest)
+    {
+        wordToCode.emplace(kv.first, kv.second.code);
+    }
 
     // ---- Counts ----
     uint32_t codeCount = static_cast<uint32_t>(codeToWords.size());

@@ -346,15 +346,10 @@ HRESULT CDIME::_HandleCompositionInput(TfEditCookie ec, _In_ ITfContext *pContex
 
     if (!pCompositionProcessorEngine->AddVirtualKey(wch))
     {
-        if (pCompositionProcessorEngine->GetVirtualKeyLength() >= WUBI_MAX_CODE_LENGTH &&
-            _pCandidateListUIPresenter)
+        // 已满四码: 拒收并响铃, 保留当前候选 (勿用空列表刷新把候选清掉).
+        if (pCompositionProcessorEngine->GetVirtualKeyLength() >= WUBI_MAX_CODE_LENGTH)
         {
             MessageBeep(MB_OK);
-            CStringRange keystroke;
-            keystroke.Set(pCompositionProcessorEngine->GetKeystrokeBuffer()->Get(),
-                pCompositionProcessorEngine->GetKeystrokeBuffer()->GetLength());
-            _pCandidateListUIPresenter->_UpdateEditCookie(ec);
-            _pCandidateListUIPresenter->_RefreshCandidateContent(&keystroke, nullptr);
         }
         goto Exit;
     }

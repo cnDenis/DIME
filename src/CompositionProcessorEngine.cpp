@@ -950,6 +950,169 @@ void CCompositionProcessorEngine::_AppendCmdWeekCandidates(_Inout_ CDIMEArray<CC
     _AppendStoredCandidate(pOut, kShortEn[dow]);
 }
 
+void CCompositionProcessorEngine::_AppendCmdUuidCandidates(_Inout_ CDIMEArray<CCandidateListItem> *pOut)
+{
+    GUID guid = {};
+    if (FAILED(CoCreateGuid(&guid)))
+    {
+        return;
+    }
+
+    // StringFromGUID2: "{XXXXXXXX-XXXX-XXXX-XXXX-XXXXXXXXXXXX}" (大写); 只用中间段.
+    WCHAR bracedUpper[64] = {L'\0'};
+    if (StringFromGUID2(guid, bracedUpper, ARRAYSIZE(bracedUpper)) <= 0)
+    {
+        return;
+    }
+
+    const size_t bracedLen = wcslen(bracedUpper);
+    if (bracedLen < 3)
+    {
+        return;
+    }
+
+    WCHAR upperHyphen[40] = {L'\0'};
+    if (FAILED(StringCchCopyN(upperHyphen, ARRAYSIZE(upperHyphen), bracedUpper + 1, bracedLen - 2)))
+    {
+        return;
+    }
+
+    WCHAR lowerHyphen[40] = {L'\0'};
+    WCHAR upperBare[40] = {L'\0'};
+    WCHAR lowerBare[40] = {L'\0'};
+    size_t barePos = 0;
+    for (size_t i = 0; upperHyphen[i] != L'\0'; i++)
+    {
+        const WCHAR ch = upperHyphen[i];
+        const WCHAR lower = (ch >= L'A' && ch <= L'Z')
+            ? static_cast<WCHAR>(ch - L'A' + L'a')
+            : ch;
+        lowerHyphen[i] = lower;
+        if (ch != L'-' && barePos + 1 < ARRAYSIZE(upperBare))
+        {
+            upperBare[barePos] = ch;
+            lowerBare[barePos] = lower;
+            barePos++;
+        }
+    }
+
+    // 小写/大写带连字符, 再无连字符; 不含花括号.
+    _AppendStoredCandidate(pOut, lowerHyphen);
+    _AppendStoredCandidate(pOut, upperHyphen);
+    _AppendStoredCandidate(pOut, lowerBare);
+    _AppendStoredCandidate(pOut, upperBare);
+}
+
+void CCompositionProcessorEngine::_AppendCmdRandCandidates(_Inout_ CDIMEArray<CCandidateListItem> *pOut)
+{
+    // 3~12 位随机整数: 每位宽取 [10^(n-1), 10^n - 1], 无前导零.
+    ULONGLONG pow10 = 100ull; // 10^(3-1)
+    for (int digits = 3; digits <= 12; digits++)
+    {
+        const ULONGLONG minV = pow10;
+        const ULONGLONG maxV = pow10 * 10ull - 1ull;
+        const ULONGLONG span = maxV - minV + 1ull;
+
+        GUID guid = {};
+        if (FAILED(CoCreateGuid(&guid)))
+        {
+            return;
+        }
+        // 取 GUID 前 8 字节作熵; IME 展示用途, 模偏差可忽略.
+        ULONGLONG entropy = 0;
+        memcpy(&entropy, &guid, sizeof(entropy));
+        const ULONGLONG value = minV + (entropy % span);
+
+        WCHAR buf[24] = {L'\0'};
+        if (SUCCEEDED(StringCchPrintfW(buf, ARRAYSIZE(buf), L"%llu", value)))
+        {
+            _AppendStoredCandidate(pOut, buf);
+        }
+
+        if (digits < 12)
+        {
+            pow10 *= 10ull;
+        }
+    }
+}
+
+void CCompositionProcessorEngine::_AppendCmdAsdfCandidates(_Inout_ CDIMEArray<CCandidateListItem> *pOut)
+{
+    _AppendCmdLetterCandidates(pOut, L'a');
+}
+
+void CCompositionProcessorEngine::_AppendCmdQwerCandidates(_Inout_ CDIMEArray<CCandidateListItem> *pOut)
+{
+    // 大小写+数字+符号 / 大小写+数字 / 大小写 / 纯大写; 各出 16 位与 8 位 (长的在前).
+    static const WCHAR kUpper[] =
+        L"ABCDEFGHIJKLMNOPQRSTUVWXYZ";
+    static const WCHAR kMixed[] =
+        L"ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz";
+    static const WCHAR kAlnum[] =
+        L"ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789";
+    // 常见密码符号, 避开引号/反斜杠/空格以免粘贴到脚本时难用.
+    static const WCHAR kSymbol[] =
+        L"ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789"
+        L"!@#$%^&*-_=+?";
+
+    static const struct
+    {
+        const WCHAR* alphabet;
+        size_t alphabetLen;
+    } kSets[] = {
+        { kSymbol, ARRAYSIZE(kSymbol) - 1 },
+        { kAlnum,  ARRAYSIZE(kAlnum) - 1 },
+        { kMixed,  ARRAYSIZE(kMixed) - 1 },
+        { kUpper,  ARRAYSIZE(kUpper) - 1 },
+    };
+    static const int kLens[] = { 16, 8 };
+
+    for (int li = 0; li < ARRAYSIZE(kLens); li++)
+    {
+        const int len = kLens[li];
+        for (int si = 0; si < ARRAYSIZE(kSets); si++)
+        {
+            GUID guid = {};
+            if (FAILED(CoCreateGuid(&guid)))
+            {
+                return;
+            }
+
+            const BYTE* entropy = reinterpret_cast<const BYTE*>(&guid);
+            const WCHAR* alphabet = kSets[si].alphabet;
+            const size_t alphabetLen = kSets[si].alphabetLen;
+            WCHAR buf[17] = {L'\0'};
+            for (int i = 0; i < len; i++)
+            {
+                buf[i] = alphabet[entropy[i] % alphabetLen];
+            }
+            _AppendStoredCandidate(pOut, buf);
+        }
+    }
+}
+
+void CCompositionProcessorEngine::_AppendCmdLetterCandidates(_Inout_ CDIMEArray<CCandidateListItem> *pOut, WCHAR baseLetter)
+{
+    // ASDF: 16~4 位连续小写 a-z; 倒排, 长的在前.
+    for (int len = 16; len >= 4; len--)
+    {
+        GUID guid = {};
+        if (FAILED(CoCreateGuid(&guid)))
+        {
+            return;
+        }
+
+        // GUID 16 字节刚好覆盖最长 16 位.
+        const BYTE* entropy = reinterpret_cast<const BYTE*>(&guid);
+        WCHAR buf[17] = {L'\0'};
+        for (int i = 0; i < len; i++)
+        {
+            buf[i] = static_cast<WCHAR>(baseLetter + (entropy[i] % 26));
+        }
+        _AppendStoredCandidate(pOut, buf);
+    }
+}
+
 void CCompositionProcessorEngine::_ExpandCmdCandidates(_Inout_ CDIMEArray<CCandidateListItem> *pCandidateList)
 {
     if (!pCandidateList || pCandidateList->Count() == 0)
@@ -1001,6 +1164,22 @@ void CCompositionProcessorEngine::_ExpandCmdCandidates(_Inout_ CDIMEArray<CCandi
         else if (IsCmdCandidate(&pLI->_ItemString, DIME_CMD_WEEK))
         {
             _AppendCmdWeekCandidates(&rebuilt, st);
+        }
+        else if (IsCmdCandidate(&pLI->_ItemString, DIME_CMD_UUID))
+        {
+            _AppendCmdUuidCandidates(&rebuilt);
+        }
+        else if (IsCmdCandidate(&pLI->_ItemString, DIME_CMD_RAND))
+        {
+            _AppendCmdRandCandidates(&rebuilt);
+        }
+        else if (IsCmdCandidate(&pLI->_ItemString, DIME_CMD_ASDF))
+        {
+            _AppendCmdAsdfCandidates(&rebuilt);
+        }
+        else if (IsCmdCandidate(&pLI->_ItemString, DIME_CMD_QWER))
+        {
+            _AppendCmdQwerCandidates(&rebuilt);
         }
         else if (IsCmdCandidate(&pLI->_ItemString, DIME_CMD_ENG))
         {

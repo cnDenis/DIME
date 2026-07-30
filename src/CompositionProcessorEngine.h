@@ -240,13 +240,18 @@ private:
     BOOL _IsKeystrokeBufferPureDigits() const;
     void _AppendPinyinDigitFormCandidates(_Inout_ CDIMEArray<CCandidateListItem> *pCandidateList);
 
-    // 将 CMD:DATE/TIME/NOW/WEEK 展开为具体字符串; CMD:ENG 保留原样供上屏拦截.
+    // 将 CMD:DATE/TIME/NOW/WEEK/UUID/RAND/ASDF/QWER 展开为具体字符串; CMD:ENG 保留原样供上屏拦截.
     void _ExpandCmdCandidates(_Inout_ CDIMEArray<CCandidateListItem> *pCandidateList);
     BOOL _StoreCmdCandidateString(_In_z_ LPCWSTR text, _Out_ CStringRange *pOut);
     void _AppendCmdDateCandidates(_Inout_ CDIMEArray<CCandidateListItem> *pOut, const SYSTEMTIME& st);
     void _AppendCmdTimeCandidates(_Inout_ CDIMEArray<CCandidateListItem> *pOut, const SYSTEMTIME& st);
     void _AppendCmdNowCandidates(_Inout_ CDIMEArray<CCandidateListItem> *pOut, const SYSTEMTIME& st);
     void _AppendCmdWeekCandidates(_Inout_ CDIMEArray<CCandidateListItem> *pOut, const SYSTEMTIME& st);
+    void _AppendCmdUuidCandidates(_Inout_ CDIMEArray<CCandidateListItem> *pOut);
+    void _AppendCmdRandCandidates(_Inout_ CDIMEArray<CCandidateListItem> *pOut);
+    void _AppendCmdAsdfCandidates(_Inout_ CDIMEArray<CCandidateListItem> *pOut);
+    void _AppendCmdQwerCandidates(_Inout_ CDIMEArray<CCandidateListItem> *pOut);
+    void _AppendCmdLetterCandidates(_Inout_ CDIMEArray<CCandidateListItem> *pOut, WCHAR baseLetter);
     BOOL _AppendStoredCandidate(_Inout_ CDIMEArray<CCandidateListItem> *pOut, _In_z_ LPCWSTR text);
 
 private:

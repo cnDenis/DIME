@@ -28,9 +28,9 @@ public:
 
     VOID LookupExact(_In_ CStringRange *pKeyCode, _Inout_ CDIMEArray<CStringRange> *pWordStrings);
 
-    // Reverse lookup: given a word (the candidate character), returns its
-    // wubi code (the dictionary key). Used by temporary pinyin mode to show
-    // the wubi code on the right side of each candidate.
+    // Reverse lookup: given a word (the candidate character), returns a wubi
+    // code for display. Prefers codes where the word is the first candidate;
+    // among equal ranks keeps the shorter code.
     BOOL LookupCodeByWord(_In_ const CStringRange *pWord, _Inout_ CStringRange *pCode);
 
 private:

@@ -32,8 +32,9 @@ public:
 
     VOID CollectWordFromConvertedStringForWildcard(_In_ CStringRange *pString, _Inout_ CDIMEArray<CCandidateListItem> *pItemList);
 
-    // Reverse lookup used by temporary pinyin mode: find the wubi code for a
+    // Reverse lookup used by temporary pinyin mode: find a wubi code for a
     // given candidate word so it can be displayed on the right side.
+    // Prefers first-candidate codes; among equal ranks keeps the shorter code.
     BOOL FindCodeByWord(_In_ const CStringRange *pWord, _Inout_ CStringRange *pCode);
 
     // "Only common characters" filter (see CBinaryDictionaryEngine). Forwarded

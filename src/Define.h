@@ -28,6 +28,10 @@
 #define DIME_CMD_TIME           L"CMD:TIME"
 #define DIME_CMD_NOW            L"CMD:NOW"
 #define DIME_CMD_WEEK           L"CMD:WEEK"
+#define DIME_CMD_UUID           L"CMD:UUID"
+#define DIME_CMD_RAND           L"CMD:RAND"
+#define DIME_CMD_ASDF           L"CMD:ASDF"
+#define DIME_CMD_QWER           L"CMD:QWER"
 #define DIME_CMD_ENG            L"CMD:ENG"
 
 #define IME_MODE_ON_ICON_INDEX      IDI_IME_MODE_ON

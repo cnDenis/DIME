@@ -3266,6 +3266,7 @@
 "ASAW"="苦丁茶"
 "ASCA"="黄梅戏"
 "ASDB"="花样百出"
+"ASDF"="CMD:ASDF"
 "ASDI"="䕩"
 "ASDO"="草木灰"
 "ASDU"="芒刺在背"
@@ -61091,6 +61092,7 @@
 "QWCY"="鈆"
 "QWCY"="鈠"
 "QWDT"="争分夺秒"
+"QWER"="CMD:QWER"
 "QWET"="鉁"
 "QWEV"="欠妥"
 "QWFF"="欠款"
@@ -61594,7 +61596,7 @@
 "RAMY"="摃"
 "RAMY"="㨺"
 "RAN"="拒"
-"RAND"="反恐怖"
+"RAND"="CMD:RAND"
 "RANG"="拒"
 "RANH"="拒收"
 "RANI"="撒尿"
@@ -81751,6 +81753,7 @@
 "UUHG"="善睐"
 "UUHK"="善战"
 "UUHU"="新闻频道"
+"UUID"="CMD:UUID"
 "UUIF"="立法"
 "UUIG"="善举"
 "UUIH"="疮痍满目"
@@ -98215,7 +98218,7 @@
 "ZZRQ"="CMD:DATE"
 "ZZSJ"="CMD:TIME"
 "ZZXS"="CMD:NOW"
-"ZZYW"="CMD:ENG"��
+"ZZYW"="CMD:ENG"��
  
  " W E E K " = " C M D : W E E K " 
  
