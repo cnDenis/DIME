@@ -1308,7 +1308,7 @@ DWORD CCandidateWindow::_GetSelectedCandidateString(_Outptr_result_maybenull_ co
 //----------------------------------------------------------------------------
 
 BOOL CCandidateWindow::_SetSelectionInPage(int nPos)
-{	
+{
     if (nPos < 0)
     {
         return FALSE;
@@ -1316,18 +1316,25 @@ BOOL CCandidateWindow::_SetSelectionInPage(int nPos)
 
     UINT pos = static_cast<UINT>(nPos);
 
-    if (pos >= _candidateList.Count())
-    {
-        return FALSE;
-    }
-
     int currentPage = 0;
     if (FAILED(_GetCurrentPage(&currentPage)))
     {
         return FALSE;
     }
 
-    _currentSelection = *_PageIndex.GetAt(currentPage) + nPos;
+    if (currentPage < 0 || static_cast<UINT>(currentPage) >= _PageIndex.Count())
+    {
+        return FALSE;
+    }
+
+    UINT pageStart = *_PageIndex.GetAt(currentPage);
+    UINT absoluteIndex = pageStart + pos;
+    if (absoluteIndex >= _candidateList.Count())
+    {
+        return FALSE;
+    }
+
+    _currentSelection = absoluteIndex;
 
     return TRUE;
 }

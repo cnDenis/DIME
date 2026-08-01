@@ -141,7 +141,7 @@ BOOL RegisterCategories()
 
 void UnregisterCategories()
 {
-    ITfCategoryMgr* pCategoryMgr = S_OK;
+    ITfCategoryMgr* pCategoryMgr = nullptr;
     HRESULT hr = S_OK;
 
     hr = CoCreateInstance(CLSID_TF_CategoryMgr, NULL, CLSCTX_INPROC_SERVER, IID_ITfCategoryMgr, (void**)&pCategoryMgr);

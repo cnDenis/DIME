@@ -636,18 +636,6 @@ void CCompositionProcessorEngine::GetCandidateList(_Inout_ CDIMEArray<CCandidate
     }
 
     _ExpandCmdCandidates(pCandidateList);
-
-    for (UINT index = 0; index < pCandidateList->Count();)
-    {
-        CCandidateListItem *pLI = pCandidateList->GetAt(index);
-        CStringRange startItemString;
-        CStringRange endItemString;
-
-        startItemString.Set(pLI->_ItemString.Get(), 1);
-        endItemString.Set(pLI->_ItemString.Get() + pLI->_ItemString.GetLength() - 1, 1);
-
-        index++;
-    }
 }
 
 BOOL CCompositionProcessorEngine::IsCmdCandidate(_In_ const CStringRange *pItem, _In_z_ LPCWSTR cmdLiteral)
@@ -1448,6 +1436,7 @@ void CCompositionProcessorEngine::GetCandidateStringInConverted(CStringRange &se
 	size_t len = 0;
 	if (StringCchLength(pwch, STRSAFE_MAX_CCH, &len) != S_OK)
     {
+        delete [] pwch;
         return;
     }
     wildcardSearch.Set(pwch, len);
@@ -1793,6 +1782,16 @@ BOOL CCompositionProcessorEngine::CheckShiftKeyOnly(_In_ CDIMEArray<TF_PRESERVED
 
 void CCompositionProcessorEngine::OnPreservedKey(REFGUID rguid, _Out_ BOOL *pIsEaten, _In_ ITfThreadMgr *pThreadMgr, TfClientId tfClientId)
 {
+    if (pIsEaten == nullptr)
+    {
+        return;
+    }
+    if (!pThreadMgr)
+    {
+        *pIsEaten = FALSE;
+        return;
+    }
+
     if (IsEqualGUID(rguid, _PreservedKey_IMEMode.Guid))
     {
         if (!CheckShiftKeyOnly(&_PreservedKey_IMEMode.TSFPreservedKeyTable))
@@ -2328,6 +2327,8 @@ BOOL CCompositionProcessorEngine::InitLanguageBar(_In_ CLangBarItemButton *pLang
             {
                 return TRUE;
             }
+            // AddItem 已成功但 compartment 失败: 从语言栏摘掉, 避免悬垂按钮.
+            pLangBarItemButton->_RemoveItem(pThreadMgr);
         }
     }
     return FALSE;

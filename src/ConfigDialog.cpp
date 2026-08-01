@@ -457,14 +457,17 @@ static void _UpdatePreviewLayout(_In_ DlgState* pState)
     int cyRow = max(px, 16);
     // Measure real glyph height when possible.
     HDC dc = GetDC(pState->hwndPreview);
-    if (dc != nullptr && pState->hPreviewFont != nullptr)
+    if (dc != nullptr)
     {
-        HFONT hOld = (HFONT)SelectObject(dc, pState->hPreviewFont);
-        TEXTMETRIC tm = {0};
-        GetTextMetrics(dc, &tm);
-        SelectObject(dc, hOld);
+        if (pState->hPreviewFont != nullptr)
+        {
+            HFONT hOld = (HFONT)SelectObject(dc, pState->hPreviewFont);
+            TEXTMETRIC tm = {0};
+            GetTextMetrics(dc, &tm);
+            SelectObject(dc, hOld);
+            cyRow = max(tm.tmHeight, px);
+        }
         ReleaseDC(pState->hwndPreview, dc);
-        cyRow = max(tm.tmHeight, px);
     }
 
     int rows = 1 + max(pState->previewCandCount, 1);
@@ -1220,6 +1223,14 @@ void DimeShowConfigDialog(_In_ HWND hwndOwner, _In_ CDIME* pTextService)
         return;
     }
 
+    // 防重入: 设置窗已打开时前置, 避免嵌套 GetMessage + PostQuitMessage 搞乱外层循环.
+    static HWND s_hwndConfigDlg = nullptr;
+    if (s_hwndConfigDlg != nullptr && IsWindow(s_hwndConfigDlg))
+    {
+        SetForegroundWindow(s_hwndConfigDlg);
+        return;
+    }
+
     static ATOM atom = 0;
     if (atom == 0)
     {
@@ -1254,6 +1265,8 @@ void DimeShowConfigDialog(_In_ HWND hwndOwner, _In_ CDIME* pTextService)
         return;
     }
 
+    s_hwndConfigDlg = hWnd;
+
     if (hwndOwner != nullptr && IsWindow(hwndOwner))
     {
         EnableWindow(hwndOwner, FALSE);
@@ -1271,6 +1284,8 @@ void DimeShowConfigDialog(_In_ HWND hwndOwner, _In_ CDIME* pTextService)
         TranslateMessage(&msg);
         DispatchMessage(&msg);
     }
+
+    s_hwndConfigDlg = nullptr;
 
     // WM_DESTROY normally re-enables the owner; cover exits that skip Destroy
     // (e.g. an unexpected WM_QUIT) so the host is not left disabled.

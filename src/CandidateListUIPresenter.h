@@ -143,5 +143,4 @@ private:
     DWORD _updatedFlags;
     DWORD _uiElementId;
     CDIME* _pTextService;
-    LONG _refCount;
 };

@@ -34,7 +34,7 @@ public:
 
     inline CONST_REF GetAt(size_t iIndex) const
     {
-        assert(iIndex <= _imeVector.size());
+        assert(iIndex < _imeVector.size());
         assert(_imeVector.size() > 0);
 
         return _imeVector[iIndex];
@@ -42,7 +42,7 @@ public:
 
     inline T& GetAt(size_t iIndex)
     {
-        assert(iIndex <= _imeVector.size());
+        assert(iIndex < _imeVector.size());
         assert(_imeVector.size() > 0);
 
         return _imeVector[iIndex];
@@ -50,11 +50,11 @@ public:
 
     void RemoveAt(size_t iIndex, size_t iElements)
     {
-        assert(iIndex <= _imeVector.size());
+        assert(iIndex < _imeVector.size());
         assert(_imeVector.size() > 0);
 
         CDIMEIter beginIter = _imeVector.begin() + iIndex;
-        CDIMEIter lastIter = beginIter + iElements - 1;
+        CDIMEIter lastIter = beginIter + iElements;
 
         _imeVector.erase(beginIter, lastIter);
     }

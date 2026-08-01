@@ -20,7 +20,7 @@ void CDIME::_ClearCompositionDisplayAttributes(TfEditCookie ec, _In_ ITfContext 
     ITfProperty* pDisplayAttributeProperty = nullptr;
 
     // get the compositon range.
-    if (FAILED(_pComposition->GetRange(&pRangeComposition)))
+    if (!_pComposition || FAILED(_pComposition->GetRange(&pRangeComposition)))
     {
         return;
     }
@@ -50,6 +50,10 @@ BOOL CDIME::_SetCompositionDisplayAttributes(TfEditCookie ec, _In_ ITfContext *p
     HRESULT hr = S_OK;
 
     // we need a range and the context it lives in
+    if (!_pComposition)
+    {
+        return FALSE;
+    }
     hr = _pComposition->GetRange(&pRangeComposition);
     if (FAILED(hr))
     {

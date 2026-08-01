@@ -239,6 +239,11 @@ BOOL CDIME::_IsKeyboardDisabled()
     ITfContext* pContext = nullptr;
     BOOL isDisabled = FALSE;
 
+    if (_pThreadMgr == nullptr)
+    {
+        return TRUE;
+    }
+
     if ((_pThreadMgr->GetFocus(&pDocMgrFocus) != S_OK) ||
         (pDocMgrFocus == nullptr))
     {
@@ -254,11 +259,16 @@ BOOL CDIME::_IsKeyboardDisabled()
     }
     else
     {
+        BOOL isKeyboardDisabled = FALSE;
+        BOOL isEmptyContext = FALSE;
+
         CCompartment CompartmentKeyboardDisabled(_pThreadMgr, _tfClientId, GUID_COMPARTMENT_KEYBOARD_DISABLED);
-        CompartmentKeyboardDisabled._GetCompartmentBOOL(isDisabled);
+        CompartmentKeyboardDisabled._GetCompartmentBOOL(isKeyboardDisabled);
 
         CCompartment CompartmentEmptyContext(_pThreadMgr, _tfClientId, GUID_COMPARTMENT_EMPTYCONTEXT);
-        CompartmentEmptyContext._GetCompartmentBOOL(isDisabled);
+        CompartmentEmptyContext._GetCompartmentBOOL(isEmptyContext);
+
+        isDisabled = isKeyboardDisabled || isEmptyContext;
     }
 
     if (pContext)
@@ -439,8 +449,17 @@ STDAPI CDIME::OnPreservedKey(ITfContext *pContext, REFGUID rguid, BOOL *pIsEaten
 {
 	pContext;
 
-    CCompositionProcessorEngine *pCompositionProcessorEngine;
-    pCompositionProcessorEngine = _pCompositionProcessorEngine;
+    if (pIsEaten == nullptr)
+    {
+        return E_INVALIDARG;
+    }
+
+    CCompositionProcessorEngine *pCompositionProcessorEngine = _pCompositionProcessorEngine;
+    if (!pCompositionProcessorEngine)
+    {
+        *pIsEaten = FALSE;
+        return S_OK;
+    }
 
     pCompositionProcessorEngine->OnPreservedKey(rguid, pIsEaten, _GetThreadMgr(), _GetClientId());
 

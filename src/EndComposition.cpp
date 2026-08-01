@@ -103,6 +103,11 @@ void CDIME::_TerminateComposition(TfEditCookie ec, _In_ ITfContext *pContext, BO
 
 void CDIME::_EndComposition(_In_opt_ ITfContext *pContext)
 {
+    if (!pContext)
+    {
+        return;
+    }
+
     CEndCompositionEditSession *pEditSession = new (std::nothrow) CEndCompositionEditSession(this, pContext);
     HRESULT hr = S_OK;
 
@@ -165,6 +170,11 @@ void CDIME::_TerminateCompositionCancel(TfEditCookie ec, _In_ ITfContext *pConte
 
 void CDIME::_CancelComposition(_In_opt_ ITfContext *pContext)
 {
+    if (!pContext)
+    {
+        return;
+    }
+
     CCancelCompositionEditSession *pEditSession = new (std::nothrow) CCancelCompositionEditSession(this, pContext);
     HRESULT hr = S_OK;
 

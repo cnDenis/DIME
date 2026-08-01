@@ -31,6 +31,7 @@ HRESULT CSearchCandidateProvider::CreateInstance(_Outptr_ ITfFnSearchCandidatePr
         return E_OUTOFMEMORY;
     }
 
+    (*ppobj)->AddRef();
     return S_OK;
 }
 
@@ -181,12 +182,18 @@ STDMETHODIMP CSearchCandidateProvider::GetSearchCandidates(BSTR bstrQuery, BSTR 
         for (int iCand = 0; iCand < cCand; iCand++)
         {
             ITfCandidateString* pCandStr = nullptr;
-            CTipCandidateString::CreateInstance(IID_ITfCandidateString, (void**)&pCandStr);
+            if (FAILED(CTipCandidateString::CreateInstance(IID_ITfCandidateString, (void**)&pCandStr)) || !pCandStr)
+            {
+                continue;
+            }
 
             ((CTipCandidateString*)pCandStr)->SetIndex(iCand);
-            ((CTipCandidateString*)pCandStr)->SetString(candidateList.GetAt(iCand)->_ItemString.Get(), candidateList.GetAt(iCand)->_ItemString.GetLength());
+            ((CTipCandidateString*)pCandStr)->SetString(
+                candidateList.GetAt(iCand)->_ItemString.Get(),
+                candidateList.GetAt(iCand)->_ItemString.GetLength());
 
             ((CTipCandidateList*)(*pplist))->SetCandidate(&pCandStr);
+            pCandStr->Release();
         }
     }
     hr = S_OK;

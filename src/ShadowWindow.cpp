@@ -150,8 +150,13 @@ void CShadowWindow::_OnOwnerWndMoved(BOOL isResized)
 
 void CShadowWindow::_Show(BOOL isShowWnd)
 {
-    _OnOwnerWndMoved(TRUE);
+    // 先 ShowWindow 再同步位置/尺寸; 否则隐藏期间 owner 的移动/resize 被
+    // _IsWindowVisible 门挡住, 首次显示会闪旧位置或旧 DIB.
     CBaseWindow::_Show(isShowWnd);
+    if (isShowWnd)
+    {
+        _OnOwnerWndMoved(TRUE);
+    }
 }
 
 //+---------------------------------------------------------------------------

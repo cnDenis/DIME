@@ -23,6 +23,7 @@ HRESULT CTipCandidateList::CreateInstance(_Outptr_ ITfCandidateList **ppobj, siz
         return E_OUTOFMEMORY;
     }
 
+    (*ppobj)->AddRef();
     return S_OK;
 }
 
@@ -55,6 +56,16 @@ CTipCandidateList::CTipCandidateList(size_t candStrReserveSize)
 
 CTipCandidateList::~CTipCandidateList()
 {
+    for (UINT i = 0; i < _tfCandStrList.Count(); i++)
+    {
+        ITfCandidateString** ppCandStr = _tfCandStrList.GetAt(i);
+        if (ppCandStr && *ppCandStr)
+        {
+            (*ppCandStr)->Release();
+            *ppCandStr = nullptr;
+        }
+    }
+    _tfCandStrList.Clear();
 }
 
 STDMETHODIMP CTipCandidateList::QueryInterface(REFIID riid, _Outptr_ void **ppvObj)
@@ -169,7 +180,7 @@ STDMETHODIMP CTipCandidateList::SetResult(ULONG nIndex, TfCandidateResult imcr)
 
 STDMETHODIMP CTipCandidateList::SetCandidate(_In_ ITfCandidateString **ppCandStr)
 {
-    if (ppCandStr == nullptr)
+    if (ppCandStr == nullptr || *ppCandStr == nullptr)
     {
         return E_POINTER;
     }
@@ -178,6 +189,7 @@ STDMETHODIMP CTipCandidateList::SetCandidate(_In_ ITfCandidateString **ppCandStr
     if (ppCandLast)
     {
         *ppCandLast = *ppCandStr;
+        (*ppCandLast)->AddRef();
     }
 
     return S_OK;

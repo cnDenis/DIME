@@ -170,4 +170,65 @@ inline bool ValidateHeader(const Header* h, uint64_t fileSize)
     return true;
 }
 
+// Validates every CodeEntry / WordRef / ReverseEntry string span and the
+// firstWordRef+wordCount ranges. Call after ValidateHeader with the mapped
+// file base so a corrupt pool cannot pass the shallow section-bounds check.
+inline bool ValidatePoolContents(const Header* h, const uint8_t* base, uint64_t fileSize)
+{
+    if (!h || !base)
+    {
+        return false;
+    }
+
+    auto poolSpanOk = [h, fileSize](uint32_t offset, uint32_t lenUnits) -> bool
+    {
+        const uint64_t end = static_cast<uint64_t>(offset) + static_cast<uint64_t>(lenUnits) * sizeof(uint16_t);
+        if (end < offset)
+        {
+            return false;
+        }
+        if (offset < h->stringPoolOffset || end > fileSize)
+        {
+            return false;
+        }
+        return true;
+    };
+
+    const CodeEntry* codes = reinterpret_cast<const CodeEntry*>(base + h->codeEntryOffset);
+    const WordRef* words = reinterpret_cast<const WordRef*>(base + h->wordRefOffset);
+    const ReverseEntry* revs = reinterpret_cast<const ReverseEntry*>(base + h->reverseEntryOffset);
+
+    for (uint32_t i = 0; i < h->codeCount; ++i)
+    {
+        const CodeEntry& ce = codes[i];
+        if (static_cast<uint64_t>(ce.firstWordRef) + ce.wordCount > h->wordPairCount)
+        {
+            return false;
+        }
+        if (!poolSpanOk(ce.codeOffset, ce.codeLen))
+        {
+            return false;
+        }
+    }
+
+    for (uint32_t i = 0; i < h->wordPairCount; ++i)
+    {
+        if (!poolSpanOk(words[i].wordOffset, words[i].wordLen))
+        {
+            return false;
+        }
+    }
+
+    for (uint32_t i = 0; i < h->reverseCount; ++i)
+    {
+        if (!poolSpanOk(revs[i].wordOffset, revs[i].wordLen) ||
+            !poolSpanOk(revs[i].codeOffset, revs[i].codeLen))
+        {
+            return false;
+        }
+    }
+
+    return true;
+}
+
 } // namespace DimeBinDict

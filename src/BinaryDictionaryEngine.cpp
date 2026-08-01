@@ -168,7 +168,9 @@ CBinaryDictionaryEngine::CBinaryDictionaryEngine(LCID locale, _In_ CFile *pDicti
     }
 
     const DimeBinDict::Header* pHdr = reinterpret_cast<const DimeBinDict::Header*>(base);
-    if (!DimeBinDict::ValidateHeader(pHdr, pDictionaryFile->GetFileSize()))
+    const uint64_t fileSize = pDictionaryFile->GetFileSize();
+    if (!DimeBinDict::ValidateHeader(pHdr, fileSize) ||
+        !DimeBinDict::ValidatePoolContents(pHdr, reinterpret_cast<const uint8_t*>(base), fileSize))
     {
         return;
     }

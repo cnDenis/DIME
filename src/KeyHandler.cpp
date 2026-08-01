@@ -60,14 +60,16 @@ VOID CDIME::_DeleteCandidateList(BOOL isForce, _In_opt_ ITfContext *pContext)
 
     isForce;pContext;
 
-    CCompositionProcessorEngine* pCompositionProcessorEngine = nullptr;
-    pCompositionProcessorEngine = _pCompositionProcessorEngine;
-    pCompositionProcessorEngine->PurgeVirtualKey();
+    CCompositionProcessorEngine* pCompositionProcessorEngine = _pCompositionProcessorEngine;
+    if (pCompositionProcessorEngine)
+    {
+        pCompositionProcessorEngine->PurgeVirtualKey();
+    }
 
     if (_pCandidateListUIPresenter)
     {
         _pCandidateListUIPresenter->_EndCandidateList();
-        delete _pCandidateListUIPresenter;
+        _pCandidateListUIPresenter->Release();
         _pCandidateListUIPresenter = nullptr;
 
         _candidateMode = CANDIDATE_NONE;
@@ -177,8 +179,11 @@ HRESULT CDIME::_HandleCompositionInput(TfEditCookie ec, _In_ ITfContext *pContex
     ULONG fetched = 0;
     BOOL isCovered = TRUE;
 
-    CCompositionProcessorEngine* pCompositionProcessorEngine = nullptr;
-    pCompositionProcessorEngine = _pCompositionProcessorEngine;
+    CCompositionProcessorEngine* pCompositionProcessorEngine = _pCompositionProcessorEngine;
+    if (!pCompositionProcessorEngine)
+    {
+        return E_FAIL;
+    }
 
     if ((_pCandidateListUIPresenter != nullptr) && (_candidateMode != CANDIDATE_INCREMENTAL))
     {
@@ -233,7 +238,7 @@ HRESULT CDIME::_HandleCompositionInput(TfEditCookie ec, _In_ ITfContext *pContex
             _pCandidateListUIPresenter->_UpdateEditCookie(ec);
             _pCandidateListUIPresenter->_RefreshCandidateContent(&emptyKey, nullptr);
         }
-        return S_OK;
+        goto Exit;
     }
 
     // Temporary English mode (triggered by ';' on an empty buffer):
@@ -259,7 +264,7 @@ HRESULT CDIME::_HandleCompositionInput(TfEditCookie ec, _In_ ITfContext *pContex
             _pCandidateListUIPresenter->_UpdateEditCookie(ec);
             _pCandidateListUIPresenter->_RefreshCandidateContent(&emptyKey, nullptr);
         }
-        return S_OK;
+        goto Exit;
     }
 
     // Enter temporary English mode by typing a capital letter on an empty buffer:
@@ -341,7 +346,7 @@ HRESULT CDIME::_HandleCompositionInput(TfEditCookie ec, _In_ ITfContext *pContex
             _pCandidateListUIPresenter->_UpdateEditCookie(ec);
             _pCandidateListUIPresenter->_RefreshCandidateContent(&keystroke, nullptr);
         }
-        return S_OK;
+        goto Exit;
     }
 
     if (!pCompositionProcessorEngine->AddVirtualKey(wch))
@@ -481,7 +486,7 @@ HRESULT CDIME::_CreateAndStartCandidate(_In_ CCompositionProcessorEngine *pCompo
     {
         // Recreate candidate list
         _pCandidateListUIPresenter->_EndCandidateList();
-        delete _pCandidateListUIPresenter;
+        _pCandidateListUIPresenter->Release();
         _pCandidateListUIPresenter = nullptr;
 
         _candidateMode = CANDIDATE_NONE;
@@ -730,8 +735,11 @@ HRESULT CDIME::_HandleCompositionConvert(TfEditCookie ec, _In_ ITfContext *pCont
     //
     // Get candidate string from composition processor engine
     //
-    CCompositionProcessorEngine* pCompositionProcessorEngine = nullptr;
-    pCompositionProcessorEngine = _pCompositionProcessorEngine;
+    CCompositionProcessorEngine* pCompositionProcessorEngine = _pCompositionProcessorEngine;
+    if (!pCompositionProcessorEngine)
+    {
+        return E_FAIL;
+    }
     pCompositionProcessorEngine->GetCandidateList(&candidateList, FALSE, isWildcardSearch);
 
     int nCount = candidateList.Count();
@@ -749,7 +757,7 @@ HRESULT CDIME::_HandleCompositionConvert(TfEditCookie ec, _In_ ITfContext *pCont
         if (_pCandidateListUIPresenter)
         {
             _pCandidateListUIPresenter->_EndCandidateList();
-            delete _pCandidateListUIPresenter;
+            _pCandidateListUIPresenter->Release();
             _pCandidateListUIPresenter = nullptr;
 
             _candidateMode = CANDIDATE_NONE;
@@ -781,7 +789,7 @@ HRESULT CDIME::_HandleCompositionConvert(TfEditCookie ec, _In_ ITfContext *pCont
         {
             // get the composition range.
             ITfRange* pRange = nullptr;
-            if (SUCCEEDED(_pComposition->GetRange(&pRange)))
+            if (_pComposition && SUCCEEDED(_pComposition->GetRange(&pRange)))
             {
                 hr = _pCandidateListUIPresenter->_StartCandidateList(_tfClientId, pDocumentMgr, pContext, ec, pRange, pCompositionProcessorEngine->GetCandidateWindowWidth());
                 pRange->Release();
@@ -914,7 +922,7 @@ HRESULT CDIME::_HandleCompositionArrowKey(TfEditCookie ec, _In_ ITfContext *pCon
     }
 
     // get the composition range
-    if (FAILED(_pComposition->GetRange(&pRangeComposition)))
+    if (!_pComposition || FAILED(_pComposition->GetRange(&pRangeComposition)))
     {
         goto Exit;
     }
@@ -969,8 +977,11 @@ HRESULT CDIME::_HandleCompositionPunctuation(TfEditCookie ec, _In_ ITfContext *p
     //
     // Get punctuation char from composition processor engine
     //
-    CCompositionProcessorEngine* pCompositionProcessorEngine = nullptr;
-    pCompositionProcessorEngine = _pCompositionProcessorEngine;
+    CCompositionProcessorEngine* pCompositionProcessorEngine = _pCompositionProcessorEngine;
+    if (!pCompositionProcessorEngine)
+    {
+        return E_FAIL;
+    }
 
     WCHAR punctuation = pCompositionProcessorEngine->GetPunctuation(wch);
 

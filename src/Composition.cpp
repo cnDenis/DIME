@@ -31,6 +31,7 @@ STDAPI CDIME::OnCompositionTerminated(TfEditCookie ecWrite, _In_ ITfComposition 
 
     if (_pComposition == pComposition)
     {
+        _pComposition->Release();
         _pComposition = nullptr;
     }
 
@@ -377,6 +378,10 @@ BOOL CDIME::_SetCompositionLanguage(TfEditCookie ec, _In_ ITfContext *pContext)
     ITfProperty* pLanguageProperty = nullptr;
 
     // we need a range and the context it lives in
+    if (!_pComposition)
+    {
+        return FALSE;
+    }
     hr = _pComposition->GetRange(&pRangeComposition);
     if (FAILED(hr))
     {

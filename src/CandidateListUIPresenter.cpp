@@ -185,7 +185,7 @@ HRESULT CDIME::_HandleCandidateWorker(TfEditCookie ec, _In_ ITfContext *pContext
     if (pContext->GetDocumentMgr(&pDocumentMgr) == S_OK)
     {
         ITfRange* pRange = nullptr;
-        if (_pComposition->GetRange(&pRange) == S_OK)
+        if (_pComposition && _pComposition->GetRange(&pRange) == S_OK)
         {
             if (pTempCandListUIPresenter)
             {
@@ -212,7 +212,7 @@ HRESULT CDIME::_HandleCandidateWorker(TfEditCookie ec, _In_ ITfContext *pContext
         if (_pCandidateListUIPresenter)
         {
             _pCandidateListUIPresenter->_EndCandidateList();
-            delete _pCandidateListUIPresenter;
+            _pCandidateListUIPresenter->Release();
             _pCandidateListUIPresenter = nullptr;
 
             _candidateMode = CANDIDATE_NONE;
@@ -227,9 +227,20 @@ HRESULT CDIME::_HandleCandidateWorker(TfEditCookie ec, _In_ ITfContext *pContext
             _candidateMode = tempCandMode;
             _isCandidateWithWildcard = FALSE;
         }
+        else
+        {
+            pTempCandListUIPresenter->_EndCandidateList();
+            pTempCandListUIPresenter->Release();
+            pTempCandListUIPresenter = nullptr;
+        }
     }
     else
     {
+        if (pTempCandListUIPresenter)
+        {
+            pTempCandListUIPresenter->Release();
+            pTempCandListUIPresenter = nullptr;
+        }
         hrReturn = _HandleCandidateFinalize(ec, pContext);
     }
 
@@ -271,6 +282,11 @@ HRESULT CDIME::_HandleCandidateArrowKey(TfEditCookie ec, _In_ ITfContext *pConte
 
 HRESULT CDIME::_HandleCandidateSelectByNumber(TfEditCookie ec, _In_ ITfContext *pContext, _In_ UINT uCode)
 {
+    if (!_pCompositionProcessorEngine)
+    {
+        return E_FAIL;
+    }
+
     int iSelectAsNumber = _pCompositionProcessorEngine->GetCandidateListIndexRange()->GetIndex(uCode);
     if (iSelectAsNumber == -1)
     {
@@ -348,6 +364,11 @@ HRESULT CDIME::_HandlePhraseArrowKey(TfEditCookie ec, _In_ ITfContext *pContext,
 
 HRESULT CDIME::_HandlePhraseSelectByNumber(TfEditCookie ec, _In_ ITfContext *pContext, _In_ UINT uCode)
 {
+    if (!_pCompositionProcessorEngine)
+    {
+        return E_FAIL;
+    }
+
     int iSelectAsNumber = _pCompositionProcessorEngine->GetCandidateListIndexRange()->GetIndex(uCode);
     if (iSelectAsNumber == -1)
     {
@@ -396,8 +417,6 @@ CCandidateListUIPresenter::CCandidateListUIPresenter(_In_ CDIME *pTextService, A
 
     _pTextService = pTextService;
     _pTextService->AddRef();
-
-    _refCount = 1;
 }
 
 //+---------------------------------------------------------------------------
@@ -464,8 +483,7 @@ STDAPI CCandidateListUIPresenter::QueryInterface(REFIID riid, _Outptr_ void **pp
 
 STDAPI_(ULONG) CCandidateListUIPresenter::AddRef()
 {
-    CTfTextLayoutSink::AddRef();
-    return ++_refCount;
+    return CTfTextLayoutSink::AddRef();
 }
 
 //+---------------------------------------------------------------------------
@@ -476,18 +494,7 @@ STDAPI_(ULONG) CCandidateListUIPresenter::AddRef()
 
 STDAPI_(ULONG) CCandidateListUIPresenter::Release()
 {
-    CTfTextLayoutSink::Release();
-
-    LONG cr = --_refCount;
-
-    assert(_refCount >= 0);
-
-    if (_refCount == 0)
-    {
-        delete this;
-    }
-
-    return cr;
+    return CTfTextLayoutSink::Release();
 }
 
 //+---------------------------------------------------------------------------
@@ -895,6 +902,7 @@ void CCandidateListUIPresenter::_EndCandidateList()
     DIME_DEBUG_LOG(L"EndCandidateList hasWnd=%d", _pCandidateWnd ? 1 : 0);
 
     EndUIElement();
+    _uiElementId = (DWORD)-1;
 
     DisposeCandidateWindow();
 

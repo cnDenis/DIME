@@ -60,10 +60,8 @@ BOOL CFile::CreateFile(_In_ PCWSTR pFileName, DWORD desiredAccess,
     DWORD sharedMode, _Inout_opt_ LPSECURITY_ATTRIBUTES lpSecurityAttributes, DWORD flagsAndAttributes, _Inout_opt_ HANDLE templateFileHandle)
 {
     size_t fullPathLen = wcslen(pFileName);
-    if (!_pFileName)
-    {
-        _pFileName = new (std::nothrow) WCHAR[ fullPathLen + 1 ];
-    }
+    delete [] _pFileName;
+    _pFileName = new (std::nothrow) WCHAR[ fullPathLen + 1 ];
     if (!_pFileName)
     {
         return FALSE;
@@ -130,7 +128,7 @@ BOOL CFile::SetupReadBuffer()
             return FALSE;
         }
 
-        wideLength = MultiByteToWideChar(_codePage, 0, (LPCSTR)_pReadBuffer, (DWORD)_fileSize, (LPWSTR)pWideBuffer, wideLength);
+        wideLength = MultiByteToWideChar(_codePage, 0, (LPCSTR)_pReadBuffer, (DWORD)dwNumberOfByteRead, (LPWSTR)pWideBuffer, wideLength);
         if (wideLength <= 0)
         {
             delete [] pWideBuffer;

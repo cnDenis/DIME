@@ -211,6 +211,7 @@ CCompartmentEventSink::CCompartmentEventSink(_In_ CESCALLBACK pfnCallback, _In_ 
 
 CCompartmentEventSink::~CCompartmentEventSink()
 {
+    _Unadvise();
 }
 
 //+---------------------------------------------------------------------------

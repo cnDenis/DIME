@@ -46,9 +46,15 @@ BOOL CDIME::_InitFunctionProviderSink()
 void CDIME::_UninitFunctionProviderSink()
 {
     ITfSourceSingle* pSourceSingle = nullptr;
-    if (SUCCEEDED(_pThreadMgr->QueryInterface(IID_ITfSourceSingle, (void **)&pSourceSingle)))
+    if (_pThreadMgr && SUCCEEDED(_pThreadMgr->QueryInterface(IID_ITfSourceSingle, (void **)&pSourceSingle)))
     {
         pSourceSingle->UnadviseSingleSink(_tfClientId, IID_ITfFunctionProvider);
         pSourceSingle->Release();
+    }
+
+    if (_pITfFnSearchCandidateProvider)
+    {
+        _pITfFnSearchCandidateProvider->Release();
+        _pITfFnSearchCandidateProvider = nullptr;
     }
 }

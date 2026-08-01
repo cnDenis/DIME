@@ -148,7 +148,8 @@ CDIME::~CDIME()
 {
     if (_pCandidateListUIPresenter)
     {
-        delete _pCandidateListUIPresenter;
+        _pCandidateListUIPresenter->_EndCandidateList();
+        _pCandidateListUIPresenter->Release();
         _pCandidateListUIPresenter = nullptr;
     }
     DllRelease();
@@ -598,6 +599,20 @@ STDAPI CDIME::Deactivate()
 
     _UninitStatusWindow();
 
+    ITfContext* pContext = _pContext;
+    if (pContext)
+    {
+        pContext->AddRef();
+        _EndComposition(pContext);
+    }
+
+    if (_pCandidateListUIPresenter)
+    {
+        _pCandidateListUIPresenter->_EndCandidateList();
+        _pCandidateListUIPresenter->Release();
+        _pCandidateListUIPresenter = nullptr;
+    }
+
     if (_pCompositionProcessorEngine)
     {
         _pCompositionProcessorEngine->SetTextService(nullptr);
@@ -605,17 +620,11 @@ STDAPI CDIME::Deactivate()
         _pCompositionProcessorEngine = nullptr;
     }
 
-    ITfContext* pContext = _pContext;
+    // Drop ownership if async TerminateComposition has not cleared it yet.
     if (_pContext)
-    {   
-        pContext->AddRef();
-        _EndComposition(_pContext);
-    }
-
-    if (_pCandidateListUIPresenter)
     {
-        delete _pCandidateListUIPresenter;
-        _pCandidateListUIPresenter = nullptr;
+        _pContext->Release();
+        _pContext = nullptr;
     }
 
     if (pContext)
@@ -706,6 +715,10 @@ HRESULT CDIME::GetFunction(__RPC__in REFGUID rguid, __RPC__in REFIID riid, __RPC
     if ((IsEqualGUID(rguid, GUID_NULL)) 
         && (IsEqualGUID(riid, __uuidof(ITfFnSearchCandidateProvider))))
     {
+        if (!_pITfFnSearchCandidateProvider)
+        {
+            return E_NOINTERFACE;
+        }
         hr = _pITfFnSearchCandidateProvider->QueryInterface(riid, (void**)ppunk);
     }
     else if (IsEqualGUID(rguid, GUID_NULL))

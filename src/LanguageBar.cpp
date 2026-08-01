@@ -373,6 +373,11 @@ STDAPI CLangBarItemButton::OnClick(TfLBIClick click, POINT pt, _In_ const RECT *
     click;pt;
     prcArea;
 
+    if (!_pCompartment)
+    {
+        return E_FAIL;
+    }
+
     BOOL isOn = FALSE;
 
     _pCompartment->_GetCompartmentBOOL(isOn);

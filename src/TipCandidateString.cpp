@@ -21,6 +21,7 @@ HRESULT CTipCandidateString::CreateInstance(_Outptr_ CTipCandidateString **ppobj
         return E_OUTOFMEMORY;
     }
 
+    (*ppobj)->AddRef();
     return S_OK;
 }
 
@@ -99,8 +100,13 @@ STDMETHODIMP_(ULONG) CTipCandidateString::Release(void)
 // ITfCandidateString methods
 STDMETHODIMP CTipCandidateString::GetString(BSTR *pbstr)
 {
+    if (pbstr == nullptr)
+    {
+        return E_POINTER;
+    }
+
     *pbstr = SysAllocString(_candidateStr.c_str());
-    return S_OK;
+    return (*pbstr != nullptr) ? S_OK : E_OUTOFMEMORY;
 }
 
 STDMETHODIMP CTipCandidateString::GetIndex(_Out_ ULONG *pnIndex)
@@ -122,6 +128,16 @@ STDMETHODIMP CTipCandidateString::SetIndex(ULONG uIndex)
 
 STDMETHODIMP CTipCandidateString::SetString(_In_ const WCHAR *pch, DWORD_PTR length)
 {
-    _candidateStr.assign(pch, 0, length);
+    if (length == 0)
+    {
+        _candidateStr.clear();
+        return S_OK;
+    }
+    if (pch == nullptr)
+    {
+        return E_INVALIDARG;
+    }
+
+    _candidateStr.assign(pch, static_cast<size_t>(length));
     return S_OK;
 }
