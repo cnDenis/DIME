@@ -46,6 +46,8 @@ enum
     IDC_CMB_PAGECNT     = 221,
 
     IDC_CHK_SHOWSTATUS  = 230,
+    IDC_ST_OPACITY_LBL  = 235,
+    IDC_CMB_OPACITY     = 236,
     IDC_ST_FONTSIZE_LBL = 231,
     IDC_CMB_FONTSIZE    = 232,
     IDC_ST_PREVIEW_LBL  = 233,
@@ -83,9 +85,11 @@ struct DlgState
     HWND     hwndPanels[4] = { nullptr, nullptr, nullptr, nullptr };
     HWND     hwndPreview  = nullptr;
     RECT     rcList       = {0,0,0,0};
-    HFONT    hFont        = nullptr;
+    HFONT    hFont        = nullptr;   // owned when ownsFont; delete on destroy
+    bool     ownsFont     = false;
     HFONT    hPreviewFont = nullptr;
     int      previewFontPx = 0;
+    UINT     dpi          = DIME_REFERENCE_DPI; // window DPI; layout scaled vs 125%
     PreviewCand previewCands[kPreviewCandMax] = {};
     int      previewCandCount = 0;
     // 词库下拉: 显示 NAME, 保存时用 stem (CB_ITEMDATA -> 下标).
@@ -93,12 +97,129 @@ struct DlgState
     int      dictItemCount = 0;
 };
 
+// Layout authored at 125% (DIME_REFERENCE_DPI = 120), same baseline as candidate /
+// status chrome. Scale with MulDiv(v, dpi, DIME_REFERENCE_DPI).
+static const int kDlgOuterW = 560;
+static const int kDlgOuterH = 540;
+
+static UINT _GetWindowDpi(_In_opt_ HWND hwnd)
+{
+    // Prefer GetDpiForWindow (Per-Monitor V2); fall back to primary-monitor LOGPIXELS.
+    if (hwnd != nullptr)
+    {
+        typedef UINT (WINAPI *PFN_GetDpiForWindow)(HWND);
+        static PFN_GetDpiForWindow pfn = reinterpret_cast<PFN_GetDpiForWindow>(
+            GetProcAddress(GetModuleHandleW(L"user32.dll"), "GetDpiForWindow"));
+        if (pfn != nullptr)
+        {
+            UINT d = pfn(hwnd);
+            if (d != 0)
+            {
+                return d;
+            }
+        }
+    }
+
+    HDC dc = GetDC(hwnd);
+    UINT dpi = dc ? (UINT)GetDeviceCaps(dc, LOGPIXELSY) : 96;
+    if (dc != nullptr)
+    {
+        ReleaseDC(hwnd, dc);
+    }
+    return dpi ? dpi : 96;
+}
+
+static UINT _GetDpiNearPoint(POINT pt)
+{
+    // GDI LOGPIXELS is virtualized to 96 for DPI-unaware processes — always safe.
+    UINT gdiDpi = _GetWindowDpi(nullptr);
+
+    // GetDpiForMonitor returns the *physical* DPI even for unaware processes.
+    // Using it there would double-scale (we enlarge, then Windows bitmap-scales).
+    // Only consult it when this thread is Per-Monitor aware.
+    typedef HANDLE (WINAPI *PFN_GetThreadDpiAwarenessContext)(void);
+    typedef INT (WINAPI *PFN_GetAwarenessFromDpiAwarenessContext)(HANDLE);
+    static PFN_GetThreadDpiAwarenessContext pfnCtx = nullptr;
+    static PFN_GetAwarenessFromDpiAwarenessContext pfnAw = nullptr;
+    static bool triedAw = false;
+    if (!triedAw)
+    {
+        triedAw = true;
+        HMODULE hUser = GetModuleHandleW(L"user32.dll");
+        if (hUser != nullptr)
+        {
+            pfnCtx = reinterpret_cast<PFN_GetThreadDpiAwarenessContext>(
+                GetProcAddress(hUser, "GetThreadDpiAwarenessContext"));
+            pfnAw = reinterpret_cast<PFN_GetAwarenessFromDpiAwarenessContext>(
+                GetProcAddress(hUser, "GetAwarenessFromDpiAwarenessContext"));
+        }
+    }
+    // DPI_AWARENESS_PER_MONITOR_AWARE == 2
+    if (pfnCtx == nullptr || pfnAw == nullptr || pfnAw(pfnCtx()) != 2)
+    {
+        return gdiDpi;
+    }
+
+    typedef HRESULT (WINAPI *PFN_GetDpiForMonitor)(HMONITOR, int, UINT*, UINT*);
+    static PFN_GetDpiForMonitor pfnMon = nullptr;
+    static bool triedMon = false;
+    if (!triedMon)
+    {
+        triedMon = true;
+        HMODULE h = LoadLibraryW(L"shcore.dll");
+        if (h != nullptr)
+        {
+            pfnMon = reinterpret_cast<PFN_GetDpiForMonitor>(
+                GetProcAddress(h, "GetDpiForMonitor"));
+        }
+    }
+    if (pfnMon != nullptr)
+    {
+        HMONITOR mon = MonitorFromPoint(pt, MONITOR_DEFAULTTONEAREST);
+        UINT dx = 0, dy = 0;
+        // MDT_EFFECTIVE_DPI == 0
+        if (mon != nullptr && SUCCEEDED(pfnMon(mon, 0, &dx, &dy)) && dy != 0)
+        {
+            return dy;
+        }
+    }
+    return gdiDpi;
+}
+
+static int _Sx(int v, UINT dpi)
+{
+    return MulDiv(v, (int)dpi, DIME_REFERENCE_DPI);
+}
+
+static HFONT _CreateDlgFont(UINT dpi)
+{
+    LOGFONT lf = {0};
+    // Icon-title font tracks system DPI; rescale when the target window DPI differs.
+    if (!SystemParametersInfo(SPI_GETICONTITLELOGFONT, sizeof(lf), &lf, 0))
+    {
+        StringCchCopy(lf.lfFaceName, ARRAYSIZE(lf.lfFaceName), SAMPLEIME_FONT_DEFAULT);
+        lf.lfHeight = -_Sx(12, dpi);
+        lf.lfWeight = FW_NORMAL;
+        lf.lfCharSet = DEFAULT_CHARSET;
+        return CreateFontIndirect(&lf);
+    }
+
+    UINT sysDpi = _GetWindowDpi(nullptr);
+    if (sysDpi != 0 && sysDpi != dpi && lf.lfHeight != 0)
+    {
+        lf.lfHeight = MulDiv(lf.lfHeight, (int)dpi, (int)sysDpi);
+    }
+    return CreateFontIndirect(&lf);
+}
+
 static WNDPROC s_prevPreviewWndProc = nullptr;
 static WNDPROC s_prevAboutLinkWndProc = nullptr;
 
 static const WCHAR kRepoUrl[] = L"https://github.com/cnDenis/DIME";
 
 static const int kFontSizeChoices[] = {0, 12, 14, 16, 18, 20, 24, 28, 32};
+// 状态栏透明度百分数 (20-100); 注册表 StatusWindowOpacity.
+static const int kOpacityChoices[] = {100, 90, 80, 70, 60, 50, 40, 30, 20};
 
 static LRESULT CALLBACK _AboutLinkWndProc(_In_ HWND hWnd, UINT uMsg, WPARAM wParam, LPARAM lParam)
 {
@@ -472,7 +593,7 @@ static void _UpdatePreviewLayout(_In_ DlgState* pState)
 
     int rows = 1 + max(pState->previewCandCount, 1);
     int h = 2 * CANDWND_BORDER_WIDTH + rows * cyRow;
-    int w = CAND_WINDOW_WIDTH_PX;
+    int w = _Sx(CAND_WINDOW_WIDTH_PX, pState->dpi);
 
     // Invalidate the parent over the old+new preview rect so shrinking the
     // control does not leave the previous left/bottom border on the panel.
@@ -705,9 +826,39 @@ static void _InitStates(_In_ DlgState* pState)
         _PopulateDictionaryCombo(pState, cmbDict, dictName);
     }
 
-    // --- Interface (status bar, page size, font) ---
+    // --- Interface (status bar, opacity, page size, font) ---
     BOOL hidden = (p->_GetStatusWindow() != nullptr) ? p->_GetStatusWindow()->_IsHiddenByUser() : FALSE;
     CheckDlgButton(pState->hwndPanels[1], IDC_CHK_SHOWSTATUS, hidden ? BST_UNCHECKED : BST_CHECKED);
+
+    {
+        int pct = 100;
+        if (p->_GetStatusWindow() != nullptr)
+        {
+            pct = p->_GetStatusWindow()->_GetOpacityPercent();
+        }
+        else
+        {
+            DWORD dw = 100;
+            _RegGetDWORD(L"StatusWindowOpacity", 100, dw);
+            pct = static_cast<int>(dw);
+        }
+        if (pct < 20) pct = 20;
+        if (pct > 100) pct = 100;
+        HWND cmbOp = GetDlgItem(pState->hwndPanels[1], IDC_CMB_OPACITY);
+        if (cmbOp != nullptr)
+        {
+            int sel = 0;
+            for (int i = 0; i < ARRAYSIZE(kOpacityChoices); ++i)
+            {
+                if (kOpacityChoices[i] == pct)
+                {
+                    sel = i;
+                    break;
+                }
+            }
+            SendMessage(cmbOp, CB_SETCURSEL, sel, 0);
+        }
+    }
 
     {
         int ps = 10;
@@ -839,6 +990,18 @@ static void _OnSettingChanged(_In_ DlgState* pState)
         fontPx = kFontSizeChoices[sel];
     }
 
+    int opacityPct = 100;
+    HWND cmbOp = GetDlgItem(pState->hwndPanels[1], IDC_CMB_OPACITY);
+    if (cmbOp != nullptr)
+    {
+        int sel = (int)SendMessage(cmbOp, CB_GETCURSEL, 0, 0);
+        if (sel < 0 || sel >= ARRAYSIZE(kOpacityChoices))
+        {
+            sel = 0;
+        }
+        opacityPct = kOpacityChoices[sel];
+    }
+
     BOOL hkOnly = (IsDlgButtonChecked(pState->hwndPanels[2], IDC_CHK_HOTKEY_ONLYCOMMON) == BST_CHECKED);
     BOOL hkPunct = (IsDlgButtonChecked(pState->hwndPanels[2], IDC_CHK_HOTKEY_PUNCTUATION) == BST_CHECKED);
     BOOL hkFull = (IsDlgButtonChecked(pState->hwndPanels[2], IDC_CHK_HOTKEY_FULLHALF) == BST_CHECKED);
@@ -884,6 +1047,11 @@ static void _OnSettingChanged(_In_ DlgState* pState)
     {
         sw->_SetHiddenByUser(!showStatus);
         sw->_Show(showStatus ? TRUE : FALSE);
+        sw->_SetOpacityPercent(opacityPct);
+    }
+    else
+    {
+        _RegSetDWORD(L"StatusWindowOpacity", (DWORD)opacityPct);
     }
     CCompositionProcessorEngine::SetSyncSettingsOnFocusEnabled(syncOnFocus);
 
@@ -902,15 +1070,28 @@ static void _CreateControls(_In_ HWND hWnd, _In_ DlgState* pState)
     int cx = rc.right - rc.left;
     int cy = rc.bottom - rc.top;
 
-    int listW = 150;
-    int listX = 12;
-    int listY = 12;
-    int listH = cy - 64;            // leave room for the close button at bottom
-    int panelX = listX + listW + 14;
-    int panelW = cx - panelX - 12;
+    // Prefer the real window DPI (Per-Monitor); fall back to the create-time estimate.
+    UINT dpi = _GetWindowDpi(hWnd);
+    if (dpi == 0)
+    {
+        dpi = pState->dpi ? pState->dpi : DIME_REFERENCE_DPI;
+    }
+    pState->dpi = dpi;
+
+    int listW = _Sx(150, dpi);
+    int listX = _Sx(12, dpi);
+    int listY = _Sx(12, dpi);
+    int listH = cy - _Sx(64, dpi); // leave room for bottom buttons
+    int panelX = listX + listW + _Sx(14, dpi);
+    int panelW = cx - panelX - _Sx(12, dpi);
     int panelH = listH;
 
-    pState->hFont = (HFONT)GetStockObject(DEFAULT_GUI_FONT);
+    pState->hFont = _CreateDlgFont(dpi);
+    pState->ownsFont = (pState->hFont != nullptr);
+    if (pState->hFont == nullptr)
+    {
+        pState->hFont = (HFONT)GetStockObject(DEFAULT_GUI_FONT);
+    }
 
     // Left category list (acts as the tab selector). Standard listbox so the
     // category text always renders; the azure border is drawn by the parent.
@@ -942,50 +1123,73 @@ static void _CreateControls(_In_ HWND hWnd, _In_ DlgState* pState)
     }
 
     // --- Input mode panel ---
+    // Coordinates authored at 125% DPI; scale so Per-Monitor-aware hosts keep
+    // every option visible instead of clipping the lower checkboxes.
     HWND panel = pState->hwndPanels[0];
     int pw = panelW;
     _CreateCtrl(panel, L"STATIC", L"词库：", WS_CHILD | WS_VISIBLE | SS_LEFT,
-        16, 12, pw - 32, 20, IDC_ST_DICT_LBL, pState->hFont);
+        _Sx(16, dpi), _Sx(12, dpi), pw - _Sx(32, dpi), _Sx(20, dpi), IDC_ST_DICT_LBL, pState->hFont);
     _CreateCtrl(panel, L"COMBOBOX", nullptr,
         WS_CHILD | WS_VISIBLE | WS_VSCROLL | CBS_DROPDOWNLIST,
-        16, 34, 200, 200, IDC_CMB_DICT, pState->hFont);
+        _Sx(16, dpi), _Sx(34, dpi), _Sx(200, dpi), _Sx(200, dpi), IDC_CMB_DICT, pState->hFont);
 
     _CreateCtrl(panel, L"BUTTON", L"全角 / 半角", WS_CHILD | WS_VISIBLE | BS_GROUPBOX,
-        12, 72, pw - 24, 96, IDC_GRP_DSB, pState->hFont);
+        _Sx(12, dpi), _Sx(72, dpi), pw - _Sx(24, dpi), _Sx(96, dpi), IDC_GRP_DSB, pState->hFont);
     _CreateCtrl(panel, L"BUTTON", L"半角", WS_CHILD | WS_VISIBLE | WS_TABSTOP | WS_GROUP | BS_AUTORADIOBUTTON,
-        28, 100, 130, 24, IDC_RADIO_HALF, pState->hFont);
+        _Sx(28, dpi), _Sx(100, dpi), _Sx(130, dpi), _Sx(24, dpi), IDC_RADIO_HALF, pState->hFont);
     _CreateCtrl(panel, L"BUTTON", L"全角", WS_CHILD | WS_VISIBLE | BS_AUTORADIOBUTTON,
-        28, 128, 130, 24, IDC_RADIO_FULL, pState->hFont);
+        _Sx(28, dpi), _Sx(128, dpi), _Sx(130, dpi), _Sx(24, dpi), IDC_RADIO_FULL, pState->hFont);
 
     _CreateCtrl(panel, L"BUTTON", L"中 / 英文标点", WS_CHILD | WS_VISIBLE | BS_GROUPBOX,
-        12, 180, pw - 24, 96, IDC_GRP_PUNCT, pState->hFont);
+        _Sx(12, dpi), _Sx(180, dpi), pw - _Sx(24, dpi), _Sx(96, dpi), IDC_GRP_PUNCT, pState->hFont);
     _CreateCtrl(panel, L"BUTTON", L"中文标点", WS_CHILD | WS_VISIBLE | WS_TABSTOP | WS_GROUP | BS_AUTORADIOBUTTON,
-        28, 208, 140, 24, IDC_RADIO_PUNCT_CN, pState->hFont);
+        _Sx(28, dpi), _Sx(208, dpi), _Sx(140, dpi), _Sx(24, dpi), IDC_RADIO_PUNCT_CN, pState->hFont);
     _CreateCtrl(panel, L"BUTTON", L"英文标点", WS_CHILD | WS_VISIBLE | BS_AUTORADIOBUTTON,
-        28, 236, 140, 24, IDC_RADIO_PUNCT_EN, pState->hFont);
+        _Sx(28, dpi), _Sx(236, dpi), _Sx(140, dpi), _Sx(24, dpi), IDC_RADIO_PUNCT_EN, pState->hFont);
 
     _CreateCtrl(panel, L"BUTTON", L"仅输出常用字（GB2312 常用字）", WS_CHILD | WS_VISIBLE | BS_AUTOCHECKBOX,
-        16, 296, pw - 32, 24, IDC_CHK_ONLYCOMMON, pState->hFont);
+        _Sx(16, dpi), _Sx(296, dpi), pw - _Sx(32, dpi), _Sx(24, dpi), IDC_CHK_ONLYCOMMON, pState->hFont);
     _CreateCtrl(panel, L"BUTTON", L"空码时检索全码表", WS_CHILD | WS_VISIBLE | BS_AUTOCHECKBOX,
-        16, 328, pw - 32, 24, IDC_CHK_EMPTY_CODE_FULL, pState->hFont);
+        _Sx(16, dpi), _Sx(328, dpi), pw - _Sx(32, dpi), _Sx(24, dpi), IDC_CHK_EMPTY_CODE_FULL, pState->hFont);
     _CreateCtrl(panel, L"BUTTON", L"数字后 , . 使用英文标点", WS_CHILD | WS_VISIBLE | BS_AUTOCHECKBOX,
-        16, 360, pw - 32, 24, IDC_CHK_DIGIT_EN_PUNCT, pState->hFont);
+        _Sx(16, dpi), _Sx(360, dpi), pw - _Sx(32, dpi), _Sx(24, dpi), IDC_CHK_DIGIT_EN_PUNCT, pState->hFont);
     _CreateCtrl(panel, L"BUTTON", L"全局同步输入模式", WS_CHILD | WS_VISIBLE | BS_AUTOCHECKBOX,
-        16, 392, pw - 32, 24, IDC_CHK_SYNC_SETTINGS, pState->hFont);
+        _Sx(16, dpi), _Sx(392, dpi), pw - _Sx(32, dpi), _Sx(24, dpi), IDC_CHK_SYNC_SETTINGS, pState->hFont);
 
     // --- Interface panel ---
     // Labels and combos share a row so the preview keeps more vertical room.
     HWND upanel = pState->hwndPanels[1];
-    const int uiLabelW = 110;
-    const int uiComboX = 16 + uiLabelW + 8;
-    const int uiComboW = 120;
+    const int uiLabelW = _Sx(110, dpi);
+    const int uiComboX = _Sx(16, dpi) + uiLabelW + _Sx(8, dpi);
+    const int uiComboW = _Sx(120, dpi);
     _CreateCtrl(upanel, L"BUTTON", L"显示浮动状态栏", WS_CHILD | WS_VISIBLE | BS_AUTOCHECKBOX,
-        16, 20, pw - 32, 24, IDC_CHK_SHOWSTATUS, pState->hFont);
+        _Sx(16, dpi), _Sx(20, dpi), pw - _Sx(32, dpi), _Sx(24, dpi), IDC_CHK_SHOWSTATUS, pState->hFont);
+    _CreateCtrl(upanel, L"STATIC", L"状态栏透明度：", WS_CHILD | WS_VISIBLE | SS_LEFT | SS_CENTERIMAGE,
+        _Sx(16, dpi), _Sx(52, dpi), uiLabelW, _Sx(24, dpi), IDC_ST_OPACITY_LBL, pState->hFont);
+    HWND hwndOpacity = _CreateCtrl(upanel, L"COMBOBOX", nullptr,
+        WS_CHILD | WS_VISIBLE | WS_VSCROLL | CBS_DROPDOWNLIST,
+        uiComboX, _Sx(52, dpi), uiComboW, _Sx(200, dpi), IDC_CMB_OPACITY, pState->hFont);
+    if (hwndOpacity != nullptr)
+    {
+        for (int i = 0; i < ARRAYSIZE(kOpacityChoices); ++i)
+        {
+            WCHAR buf[16] = {0};
+            if (kOpacityChoices[i] >= 100)
+            {
+                StringCchCopy(buf, ARRAYSIZE(buf), L"不透明");
+            }
+            else
+            {
+                StringCchPrintf(buf, ARRAYSIZE(buf), L"%d%%", kOpacityChoices[i]);
+            }
+            SendMessage(hwndOpacity, CB_ADDSTRING, 0, (LPARAM)buf);
+        }
+    }
     _CreateCtrl(upanel, L"STATIC", L"每页候选字数：", WS_CHILD | WS_VISIBLE | SS_LEFT | SS_CENTERIMAGE,
-        16, 52, uiLabelW, 24, IDC_ST_PAGECNT_LBL, pState->hFont);
+        _Sx(16, dpi), _Sx(84, dpi), uiLabelW, _Sx(24, dpi), IDC_ST_PAGECNT_LBL, pState->hFont);
     HWND hwndCombo = _CreateCtrl(upanel, L"COMBOBOX", nullptr,
         WS_CHILD | WS_VISIBLE | WS_VSCROLL | CBS_DROPDOWNLIST,
-        uiComboX, 52, uiComboW, 200, IDC_CMB_PAGECNT, pState->hFont);
+        uiComboX, _Sx(84, dpi), uiComboW, _Sx(200, dpi), IDC_CMB_PAGECNT, pState->hFont);
     if (hwndCombo != nullptr)
     {
         for (int i = 1; i <= 10; ++i)
@@ -996,10 +1200,10 @@ static void _CreateControls(_In_ HWND hWnd, _In_ DlgState* pState)
         }
     }
     _CreateCtrl(upanel, L"STATIC", L"候选框字号：", WS_CHILD | WS_VISIBLE | SS_LEFT | SS_CENTERIMAGE,
-        16, 84, uiLabelW, 24, IDC_ST_FONTSIZE_LBL, pState->hFont);
+        _Sx(16, dpi), _Sx(116, dpi), uiLabelW, _Sx(24, dpi), IDC_ST_FONTSIZE_LBL, pState->hFont);
     HWND hwndFontCombo = _CreateCtrl(upanel, L"COMBOBOX", nullptr,
         WS_CHILD | WS_VISIBLE | WS_VSCROLL | CBS_DROPDOWNLIST,
-        uiComboX, 84, uiComboW, 220, IDC_CMB_FONTSIZE, pState->hFont);
+        uiComboX, _Sx(116, dpi), uiComboW, _Sx(220, dpi), IDC_CMB_FONTSIZE, pState->hFont);
     if (hwndFontCombo != nullptr)
     {
         WCHAR autoLabel[32] = {0};
@@ -1014,9 +1218,10 @@ static void _CreateControls(_In_ HWND hWnd, _In_ DlgState* pState)
         }
     }
     _CreateCtrl(upanel, L"STATIC", L"预览：", WS_CHILD | WS_VISIBLE | SS_LEFT,
-        16, 120, pw - 32, 24, IDC_ST_PREVIEW_LBL, pState->hFont);
+        _Sx(16, dpi), _Sx(152, dpi), pw - _Sx(32, dpi), _Sx(24, dpi), IDC_ST_PREVIEW_LBL, pState->hFont);
     pState->hwndPreview = _CreateCtrl(upanel, L"STATIC", nullptr,
-        WS_CHILD | WS_VISIBLE, 16, 148, CAND_WINDOW_WIDTH_PX, 120, IDC_PREVIEW, nullptr);
+        WS_CHILD | WS_VISIBLE, _Sx(16, dpi), _Sx(180, dpi),
+        _Sx(CAND_WINDOW_WIDTH_PX, dpi), _Sx(120, dpi), IDC_PREVIEW, nullptr);
     if (pState->hwndPreview != nullptr)
     {
         SetWindowLongPtr(pState->hwndPreview, GWLP_USERDATA, (LONG_PTR)pState);
@@ -1027,15 +1232,15 @@ static void _CreateControls(_In_ HWND hWnd, _In_ DlgState* pState)
     _CreateCtrl(pState->hwndPanels[2], L"BUTTON",
         L"Ctrl+M  切换常用字 / 全码表",
         WS_CHILD | WS_VISIBLE | BS_AUTOCHECKBOX,
-        16, 20, pw - 32, 24, IDC_CHK_HOTKEY_ONLYCOMMON, pState->hFont);
+        _Sx(16, dpi), _Sx(20, dpi), pw - _Sx(32, dpi), _Sx(24, dpi), IDC_CHK_HOTKEY_ONLYCOMMON, pState->hFont);
     _CreateCtrl(pState->hwndPanels[2], L"BUTTON",
         L"Ctrl+.  切换中 / 英文标点",
         WS_CHILD | WS_VISIBLE | BS_AUTOCHECKBOX,
-        16, 52, pw - 32, 24, IDC_CHK_HOTKEY_PUNCTUATION, pState->hFont);
+        _Sx(16, dpi), _Sx(52, dpi), pw - _Sx(32, dpi), _Sx(24, dpi), IDC_CHK_HOTKEY_PUNCTUATION, pState->hFont);
     _CreateCtrl(pState->hwndPanels[2], L"BUTTON",
         L"Shift+空格  切换全 / 半角",
         WS_CHILD | WS_VISIBLE | BS_AUTOCHECKBOX,
-        16, 84, pw - 32, 24, IDC_CHK_HOTKEY_FULLHALF, pState->hFont);
+        _Sx(16, dpi), _Sx(84, dpi), pw - _Sx(32, dpi), _Sx(24, dpi), IDC_CHK_HOTKEY_FULLHALF, pState->hFont);
 
     // --- About panel ---
     // Keep a comma before DIME_VERSION_STRING_W so it is a %s argument, not
@@ -1048,27 +1253,34 @@ static void _CreateControls(_In_ HWND hWnd, _In_ DlgState* pState)
         L"\r\n",
         DIME_VERSION_STRING_W);
     _CreateCtrl(pState->hwndPanels[3], L"STATIC", aboutText,
-        WS_CHILD | WS_VISIBLE | SS_LEFT, 16, 16, pw - 32, 100, IDC_ST_ABOUT, pState->hFont);
+        WS_CHILD | WS_VISIBLE | SS_LEFT,
+        _Sx(16, dpi), _Sx(16, dpi), pw - _Sx(32, dpi), _Sx(100, dpi), IDC_ST_ABOUT, pState->hFont);
 
     HWND hwndLink = _CreateCtrl(pState->hwndPanels[3], L"STATIC", kRepoUrl,
         WS_CHILD | WS_VISIBLE | WS_TABSTOP | SS_LEFT | SS_NOTIFY,
-        16, 116, pw - 32, 24, IDC_ST_ABOUT_LINK, pState->hFont);
+        _Sx(16, dpi), _Sx(116, dpi), pw - _Sx(32, dpi), _Sx(24, dpi), IDC_ST_ABOUT_LINK, pState->hFont);
     if (hwndLink != nullptr)
     {
         s_prevAboutLinkWndProc = (WNDPROC)SetWindowLongPtr(hwndLink, GWLP_WNDPROC, (LONG_PTR)_AboutLinkWndProc);
     }
 
     _CreateCtrl(pState->hwndPanels[3], L"STATIC", L"版权所有 © 2026 cnDenis",
-        WS_CHILD | WS_VISIBLE | SS_LEFT, 16, 156, pw - 32, 24, IDC_ST_ABOUT_COPY, pState->hFont);
+        WS_CHILD | WS_VISIBLE | SS_LEFT,
+        _Sx(16, dpi), _Sx(156, dpi), pw - _Sx(32, dpi), _Sx(24, dpi), IDC_ST_ABOUT_COPY, pState->hFont);
 
     // --- Bottom-right buttons: 确定 (apply+close) / 取消 (cancel) / 应用 (apply) ---
     // Owner-drawn so they get the light-blue face.
+    const int btnW = _Sx(88, dpi);
+    const int btnH = _Sx(28, dpi);
+    const int btnGap = _Sx(8, dpi);
+    const int btnMargin = _Sx(12, dpi);
+    const int btnY = cy - btnMargin - btnH;
     pState->hwndClose = _CreateCtrl(hWnd, L"BUTTON", L"取消", WS_CHILD | WS_VISIBLE | WS_TABSTOP | BS_OWNERDRAW,
-        cx - 12 - 88, cy - 12 - 28, 88, 28, IDC_BTN_CANCEL, pState->hFont);
+        cx - btnMargin - btnW, btnY, btnW, btnH, IDC_BTN_CANCEL, pState->hFont);
     _CreateCtrl(hWnd, L"BUTTON", L"应用", WS_CHILD | WS_VISIBLE | WS_TABSTOP | BS_OWNERDRAW,
-        cx - 12 - 88 - 8 - 88, cy - 12 - 28, 88, 28, IDC_BTN_APPLY, pState->hFont);
+        cx - btnMargin - btnW - btnGap - btnW, btnY, btnW, btnH, IDC_BTN_APPLY, pState->hFont);
     _CreateCtrl(hWnd, L"BUTTON", L"确定", WS_CHILD | WS_VISIBLE | WS_TABSTOP | BS_OWNERDRAW,
-        cx - 12 - 88 - 8 - 88 - 8 - 88, cy - 12 - 28, 88, 28, IDC_BTN_OK, pState->hFont);
+        cx - btnMargin - btnW - btnGap - btnW - btnGap - btnW, btnY, btnW, btnH, IDC_BTN_OK, pState->hFont);
 
     _InitStates(pState);
 }
@@ -1201,6 +1413,12 @@ static LRESULT CALLBACK ConfigDlgProc(_In_ HWND hWnd, UINT uMsg, WPARAM wParam, 
                     DeleteObject(pState->hPreviewFont);
                     pState->hPreviewFont = nullptr;
                 }
+                if (pState->ownsFont && pState->hFont != nullptr)
+                {
+                    DeleteObject(pState->hFont);
+                    pState->hFont = nullptr;
+                    pState->ownsFont = false;
+                }
                 if (pState->hwndOwner != nullptr && IsWindow(pState->hwndOwner))
                 {
                     EnableWindow(pState->hwndOwner, TRUE);
@@ -1255,9 +1473,18 @@ void DimeShowConfigDialog(_In_ HWND hwndOwner, _In_ CDIME* pTextService)
     pState->pTextService = pTextService;
     pState->hwndOwner = hwndOwner;
 
+    // Scale outer size from the 125% design so Per-Monitor-aware hosts
+    // (dime_config.exe, modern apps) keep a usable client area.
+    POINT ptCursor = {0, 0};
+    GetCursorPos(&ptCursor);
+    UINT dpi = _GetDpiNearPoint(ptCursor);
+    pState->dpi = dpi;
+    int outerW = _Sx(kDlgOuterW, dpi);
+    int outerH = _Sx(kDlgOuterH, dpi);
+
     HWND hWnd = CreateWindowEx(WS_EX_TOPMOST, L"DimeConfigDialog", L"迪弥五笔设置",
         WS_OVERLAPPEDWINDOW & ~(WS_MAXIMIZEBOX | WS_MINIMIZEBOX | WS_THICKFRAME),
-        CW_USEDEFAULT, CW_USEDEFAULT, 560, 540,
+        CW_USEDEFAULT, CW_USEDEFAULT, outerW, outerH,
         nullptr, nullptr, Global::dllInstanceHandle, pState);
     if (hWnd == nullptr)
     {

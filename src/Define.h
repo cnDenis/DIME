@@ -70,7 +70,7 @@
 #define _TF_MOD_ON_KEYUP_CONTROL_ONLY  (0x00020000 | TF_MOD_ON_KEYUP)
 #define _TF_MOD_ON_KEYUP_ALT_ONLY      (0x00040000 | TF_MOD_ON_KEYUP)
 
-#define CAND_WINDOW_WIDTH_PX    (200)
+#define CAND_WINDOW_WIDTH_PX    (200)   // 125% reference; CandidateWindow scales by DPI / DIME_REFERENCE_DPI
 
 //---------------------------------------------------------------------
 // string length of CLSID

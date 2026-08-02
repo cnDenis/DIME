@@ -278,6 +278,7 @@ void CDIME::_RefreshStatusWindow()
     // the registry here keeps every other instance in sync (and survives an IME
     // restart), so the bar stays hidden no matter where it was hidden from.
     _pStatusWindow->_LoadHiddenState();
+    _pStatusWindow->_LoadOpacity();
 
     // Respect an explicit "hide" chosen from the context menu: keep the bar
     // hidden across refreshes until the user shows it again.
@@ -314,7 +315,7 @@ void CDIME::_RefreshStatusWindow()
     }
 
     // IME off (English mode, e.g. Ctrl+Space): keep the bar visible but gray
-    // out every icon as an "inactive" hint rather than hiding it.
+    // out every icon, and auto-dim opacity as an "inactive" hint.
     if (!isOpen)
     {
         _pStatusWindow->_SetGrayed(TRUE);

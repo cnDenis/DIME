@@ -166,6 +166,9 @@ BOOL CStatusWindow::_Create(ATOM atom, _In_opt_ HWND parentWndHandle)
     // (the region excludes the corner pixels, letting the desktop show).
     _ApplyRoundedCorners();
 
+    _LoadOpacity();
+    _ApplyOpacity();
+
     return TRUE;
 }
 
@@ -229,9 +232,11 @@ void CStatusWindow::_SetStates(BOOL isFullWidth, BOOL isChinesePunctuation, BOOL
 
 void CStatusWindow::_SetGrayed(BOOL isGrayed)
 {
-    if (_isGrayed != isGrayed)
+    const BOOL changed = (_isGrayed != isGrayed);
+    _isGrayed = isGrayed;
+    _ApplyOpacity(); // 关闭时自动半透明 / 开启时恢复用户设定
+    if (changed)
     {
-        _isGrayed = isGrayed;
         _RepaintNow();
     }
 }
@@ -321,6 +326,68 @@ void CStatusWindow::_SetHiddenByUser(BOOL hidden)
     {
         reg.SetDWORDValue(L"StatusWindowHidden", hidden ? 1 : 0);
     }
+}
+
+void CStatusWindow::_LoadOpacity()
+{
+    DWORD pct = 100;
+    CRegKey reg;
+    if (reg.Open(HKEY_CURRENT_USER, L"Software\\DIME") == ERROR_SUCCESS)
+    {
+        DWORD dw = 100;
+        if (reg.QueryDWORDValue(L"StatusWindowOpacity", dw) == ERROR_SUCCESS)
+        {
+            pct = dw;
+        }
+    }
+    if (pct < 20) pct = 20;
+    if (pct > 100) pct = 100;
+    _opacityAlpha = static_cast<BYTE>((pct * 255) / 100);
+}
+
+void CStatusWindow::_ApplyOpacity()
+{
+    HWND hwnd = _GetWnd();
+    if (hwnd == nullptr)
+    {
+        return;
+    }
+    LONG_PTR ex = GetWindowLongPtr(hwnd, GWL_EXSTYLE);
+    if ((ex & WS_EX_LAYERED) == 0)
+    {
+        SetWindowLongPtr(hwnd, GWL_EXSTYLE, ex | WS_EX_LAYERED);
+    }
+
+    BYTE alpha = _opacityAlpha;
+    if (_isGrayed)
+    {
+        // 输入法关闭: 透明度为用户设定的 70%.
+        alpha = static_cast<BYTE>((static_cast<int>(_opacityAlpha) * 70) / 100);
+        if (alpha < 1)
+        {
+            alpha = 1;
+        }
+    }
+    SetLayeredWindowAttributes(hwnd, 0, alpha, LWA_ALPHA);
+}
+
+void CStatusWindow::_SetOpacityPercent(int percent)
+{
+    if (percent < 20) percent = 20;
+    if (percent > 100) percent = 100;
+    _opacityAlpha = static_cast<BYTE>((percent * 255) / 100);
+
+    CRegKey reg;
+    if (reg.Create(HKEY_CURRENT_USER, L"Software\\DIME") == ERROR_SUCCESS)
+    {
+        reg.SetDWORDValue(L"StatusWindowOpacity", static_cast<DWORD>(percent));
+    }
+    _ApplyOpacity();
+}
+
+int CStatusWindow::_GetOpacityPercent() const
+{
+    return (static_cast<int>(_opacityAlpha) * 100 + 127) / 255;
 }
 
 //+---------------------------------------------------------------------------

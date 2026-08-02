@@ -333,7 +333,10 @@ void CCandidateWindow::_ResizeWindow()
 
     // In temporary English mode the encoding area can hold up to 32 characters,
     // so widen the window to fit the typed text instead of clipping it.
-    int minWidth = (_wndWidth > 0) ? static_cast<int>(_wndWidth) : CAND_WINDOW_WIDTH_PX;
+    // Width is authored at 125% (CAND_WINDOW_WIDTH_PX); scale like _cyRow so
+    // high-DPI displays stay proportional to the font instead of looking skinny.
+    int baseWidth = (_wndWidth > 0) ? static_cast<int>(_wndWidth) : CAND_WINDOW_WIDTH_PX;
+    int minWidth = static_cast<int>(baseWidth * (static_cast<float>(dpi) / DIME_REFERENCE_DPI) + 0.5f);
     if (_isEnglishMode && _keystrokeCodeLen > 0)
     {
         int needed = _TextMetric.tmAveCharWidth * (static_cast<int>(_keystrokeCodeLen) + 2)
